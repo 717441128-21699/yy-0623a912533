@@ -21,7 +21,10 @@ import {
   Tooltip,
   Divider,
   Progress,
-  Radio
+  Radio,
+  Tabs,
+  Timeline,
+  Collapse
 } from 'antd';
 import {
   SearchOutlined,
@@ -79,12 +82,27 @@ const RefundPage: React.FC = () => {
       .reduce((sum, r) => sum + r.redemptionCount, 0);
   };
 
+  const getApprovedRefundCount = (couponNo: string): number => {
+    return refunds
+      .filter(r => r.couponNo === couponNo && r.auditStatus === 'approved')
+      .reduce((sum, r) => sum + r.refundCount, 0);
+  };
+
+  const getPendingRefundCount = (couponNo: string): number => {
+    return refunds
+      .filter(r => r.couponNo === couponNo && r.auditStatus === 'pending')
+      .reduce((sum, r) => sum + r.refundCount, 0);
+  };
+
+  const getAvailableRefundCount = (c: Coupon): number => {
+    const used = getActualUsedCount(c.couponNo);
+    const pendingRefund = getPendingRefundCount(c.couponNo);
+    return Math.max(0, c.totalCount - used - pendingRefund);
+  };
+
   const getActualRemainingCount = (c: Coupon): number => {
     const used = getActualUsedCount(c.couponNo);
-    const refunded = refunds
-      .filter(r => r.couponNo === c.couponNo && r.auditStatus === 'approved')
-      .reduce((sum, r) => sum + r.refundCount, 0);
-    return Math.max(0, c.totalCount - used - refunded);
+    return Math.max(0, c.totalCount - used);
   };
 
   const [keyword, setKeyword] = useState('');
@@ -98,6 +116,9 @@ const RefundPage: React.FC = () => {
   const [auditForm] = Form.useForm();
   const [auditOpen, setAuditOpen] = useState(false);
   const [selectedCouponForRefund, setSelectedCouponForRefund] = useState<Coupon | null>(null);
+  const [activeTab, setActiveTab] = useState<'list' | 'ledger'>('list');
+  const [ledgerKeyword, setLedgerKeyword] = useState('');
+  const [expandedCoupon, setExpandedCoupon] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return refunds.filter(r => {
@@ -132,6 +153,118 @@ const RefundPage: React.FC = () => {
       todayAmount: refunds.filter(r => r.date === businessDate).reduce((s, r) => s + r.refundAmount, 0)
     };
   }, [refunds, businessDate]);
+
+  const ledgerData = useMemo(() => {
+    const couponMap = new Map<string, any>();
+    coupons.forEach(c => {
+      couponMap.set(c.couponNo, {
+        coupon: c,
+        payments: [] as any[],
+        redemptions: [] as any[],
+        refunds: [] as any[],
+        usedCount: getActualUsedCount(c.couponNo),
+        approvedRefund: getApprovedRefundCount(c.couponNo),
+        pendingRefund: getPendingRefundCount(c.couponNo),
+        availableCount: getAvailableRefundCount(c),
+        remainingCount: getActualRemainingCount(c),
+        timeline: [] as any[]
+      });
+    });
+    paymentOrders.forEach(o => {
+      if (!o.couponNo || !couponMap.has(o.couponNo)) return;
+      couponMap.get(o.couponNo).payments.push(o);
+    });
+    redemptions.forEach(r => {
+      if (!couponMap.has(r.couponNo)) return;
+      couponMap.get(r.couponNo).redemptions.push(r);
+    });
+    refunds.forEach(r => {
+      if (!couponMap.has(r.couponNo)) return;
+      couponMap.get(r.couponNo).refunds.push(r);
+    });
+    const result: any[] = [];
+    couponMap.forEach((item, couponNo) => {
+      const { coupon, payments, redemptions: reds, refunds: refs } = item;
+      const timeline: any[] = [];
+      payments.forEach((p: any) => {
+        timeline.push({
+          type: 'payment',
+          time: p.createdAt || (p.date + ' 00:00:00'),
+          title: '购买卡券',
+          desc: '订单号 ' + p.orderNo + '，实付 ¥' + p.paidAmount.toFixed(2) + '，共' + coupon.totalCount + '次',
+          amount: p.paidAmount,
+          raw: p
+        });
+      });
+      reds.forEach((r: any) => {
+        timeline.push({
+          type: 'redemption',
+          time: r.date + ' ' + r.time,
+          title: '核销服务',
+          desc: r.projectName + '，核销' + r.redemptionCount + '次，金额 ¥' + r.amount.toFixed(2) + '（' + r.serviceStore + '）',
+          amount: -r.amount,
+          raw: r
+        });
+      });
+      refs.forEach((r: any) => {
+        const statusMap: any = {
+          pending: '待审核',
+          approved: '已通过',
+          rejected: '已驳回'
+        };
+        timeline.push({
+          type: 'refund_' + r.auditStatus,
+          time: r.createdAt || (r.date + ' 00:00:00'),
+          title: '退款申请 ' + statusMap[r.auditStatus],
+          desc: r.refundNo + '，退款' + r.refundCount + '次，金额 ¥' + r.refundAmount.toFixed(2) + '，原因：' + r.reason,
+          amount: r.auditStatus === 'approved' ? -r.refundAmount : 0,
+          raw: r
+        });
+      });
+      timeline.sort((a, b) => a.time.localeCompare(b.time));
+      result.push({
+        couponNo,
+        couponName: coupon.couponName,
+        customerName: coupon.customerName,
+        phone: coupon.phone,
+        projectName: coupon.projectName,
+        projectCategory: coupon.projectCategory,
+        soldStore: coupon.soldStore,
+        unitPrice: coupon.unitPrice,
+        totalCount: coupon.totalCount,
+        originalTotalCount: coupon.totalCount + item.approvedRefund,
+        usedCount: item.usedCount,
+        approvedRefund: item.approvedRefund,
+        pendingRefund: item.pendingRefund,
+        availableCount: item.availableCount,
+        remainingCount: item.remainingCount,
+        totalPaid: payments.reduce((s: number, p: any) => s + p.paidAmount, 0),
+        totalRedeemed: reds.reduce((s: number, r: any) => s + r.amount, 0),
+        totalRefunded: refs.filter((r: any) => r.auditStatus === 'approved').reduce((s: number, r: any) => s + r.refundAmount, 0),
+        refundCount: refs.length,
+        status: coupon.status,
+        sourceType: coupon.sourceType,
+        consultant: coupon.consultant,
+        timeline,
+        payments,
+        redemptions: reds,
+        refunds: refs
+      });
+    });
+    return result.sort((a, b) => b.totalPaid - a.totalPaid);
+  }, [coupons, paymentOrders, redemptions, refunds]);
+
+  const filteredLedger = useMemo(() => {
+    if (!ledgerKeyword) return ledgerData;
+    const kw = ledgerKeyword.toLowerCase();
+    return ledgerData.filter((d: any) =>
+      d.couponNo.toLowerCase().includes(kw) ||
+      d.customerName.toLowerCase().includes(kw) ||
+      d.phone.includes(kw) ||
+      d.couponName.toLowerCase().includes(kw) ||
+      d.projectName.toLowerCase().includes(kw)
+    );
+  }, [ledgerData, ledgerKeyword]);
 
   const getCouponForRefund = (couponNo: string) => coupons.find(c => c.couponNo === couponNo);
   const getRedemptionsForCoupon = (couponNo: string) =>
@@ -168,7 +301,7 @@ const RefundPage: React.FC = () => {
   };
 
   const startCreate = () => {
-    if (coupons.filter(c => getActualRemainingCount(c) > 0 && c.status === 'active').length === 0) {
+    if (coupons.filter(c => getAvailableRefundCount(c) > 0 && c.status === 'active').length === 0) {
       message.warning('没有可退款的有效卡券');
       return;
     }
@@ -182,7 +315,11 @@ const RefundPage: React.FC = () => {
     if (c) {
       setSelectedCouponForRefund(c);
       const usedCount = getActualUsedCount(c.couponNo);
-      const remainingCount = getActualRemainingCount(c);
+      const approvedRefund = getApprovedRefundCount(c.couponNo);
+      const pendingRefund = getPendingRefundCount(c.couponNo);
+      const effectiveTotal = c.totalCount - approvedRefund;
+      const remainingCount = Math.max(0, effectiveTotal - usedCount);
+      const availableCount = getAvailableRefundCount(c);
       createForm.setFieldsValue({
         couponId: c.id,
         customerName: c.customerName,
@@ -192,12 +329,14 @@ const RefundPage: React.FC = () => {
         couponNo: c.couponNo,
         totalCount: c.totalCount,
         usedCount,
+        approvedRefund,
+        pendingRefund,
         remainingCount,
         unitPrice: c.unitPrice,
-        refundCount: remainingCount,
-        refundAmount: Number((remainingCount * c.unitPrice).toFixed(2)),
+        refundCount: availableCount,
+        refundAmount: Number((availableCount * c.unitPrice).toFixed(2)),
         soldStore: c.soldStore,
-        maxRefundCount: remainingCount
+        maxRefundCount: availableCount
       });
     }
   };
@@ -210,6 +349,15 @@ const RefundPage: React.FC = () => {
 
   const submitCreate = async (values: any) => {
     if (!selectedCouponForRefund) return;
+    const availableCount = getAvailableRefundCount(selectedCouponForRefund);
+    if (values.refundCount > availableCount) {
+      message.error('退款次数超过可退额度，当前可退 ' + availableCount + ' 次（含待审占用）');
+      return;
+    }
+    const usedCount = getActualUsedCount(selectedCouponForRefund.couponNo);
+    const approvedRefund = getApprovedRefundCount(selectedCouponForRefund.couponNo);
+    const effectiveTotal = selectedCouponForRefund.totalCount - approvedRefund;
+    const remainingCount = Math.max(0, effectiveTotal - usedCount);
     const newRecord: RefundRecord = {
       id: genId('RF'),
       refundNo: 'TK' + businessDate.replace(/-/g, '') + (refunds.length + 1).toString().padStart(4, '0'),
@@ -220,9 +368,9 @@ const RefundPage: React.FC = () => {
       couponNo: selectedCouponForRefund.couponNo,
       couponName: values.couponName,
       projectName: values.projectName,
-      totalCount: values.totalCount,
-      usedCount: values.usedCount,
-      remainingCount: values.remainingCount,
+      totalCount: selectedCouponForRefund.totalCount,
+      usedCount,
+      remainingCount,
       refundCount: values.refundCount,
       refundAmount: Number(values.refundAmount.toFixed(2)),
       soldStore: values.soldStore,
@@ -409,7 +557,7 @@ const RefundPage: React.FC = () => {
     }
   ];
 
-  const availableCoupons = coupons.filter(c => getActualRemainingCount(c) > 0 && c.status === 'active');
+  const availableCoupons = coupons.filter(c => getAvailableRefundCount(c) > 0 && c.status === 'active');
 
   return (
     <div>
@@ -477,8 +625,19 @@ const RefundPage: React.FC = () => {
         </Col>
       </Row>
 
-      <div className="filter-section">
-        <Row gutter={[12, 12]} align="middle">
+      <Card bordered={false} style={{ borderRadius: 8, padding: 0 }} bodyStyle={{ padding: 0 }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={k => setActiveTab(k as any)}
+          style={{ marginBottom: 0 }}
+          items={[
+            {
+              key: 'list',
+              label: '退款明细',
+              children: (
+                <>
+                  <div className="filter-section" style={{ marginTop: 0 }}>
+                    <Row gutter={[12, 12]} align="middle">
           <Col span={4}>
             <RangePicker
               style={{ width: '100%' }}
@@ -555,6 +714,163 @@ const RefundPage: React.FC = () => {
               </Table.Summary>
             );
           }}
+        />
+      </Card>
+                </>
+              )
+            },
+            {
+              key: 'ledger',
+              label: '券号台账',
+              children: (
+                <div style={{ padding: '0 16px 16px' }}>
+                  <div className="filter-section" style={{ marginTop: 0, marginBottom: 12 }}>
+                    <Row gutter={[12, 12]} align="middle">
+                      <Col span={10}>
+                        <Input
+                          prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
+                          placeholder="搜索 顾客 / 手机号 / 券号 / 卡券名称 / 项目"
+                          value={ledgerKeyword}
+                          onChange={e => setLedgerKeyword(e.target.value)}
+                          allowClear
+                        />
+                      </Col>
+                      <Col span={14} style={{ textAlign: 'right', color: '#6b7280', fontSize: 12 }}>
+                        共 {filteredLedger.length} 张卡券 · 点击卡片展开时间线查看全流程
+                      </Col>
+                    </Row>
+                  </div>
+
+                  <Row gutter={[12, 12]}>
+                    {filteredLedger.map((item: any) => {
+                      const isExpanded = expandedCoupon === item.couponNo;
+                      return (
+                        <Col span={24} key={item.couponNo}>
+                          <Card
+                            bordered
+                            size="small"
+                            style={{ borderRadius: 6, cursor: 'pointer' }}
+                            onClick={() => setExpandedCoupon(isExpanded ? null : item.couponNo)}
+                          >
+                            <Row align="middle" gutter={12}>
+                              <Col flex="220px">
+                                <Space>
+                                  <span className="tag-pro">{item.couponNo}</span>
+                                  <span style={{ fontWeight: 600, color: '#1f4e79' }}>{item.couponName}</span>
+                                </Space>
+                                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                                  {item.customerName} · {item.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')} · {item.soldStore}
+                                </div>
+                              </Col>
+                              <Col flex="100px" style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>总次数</div>
+                                <div style={{ fontSize: 16, fontWeight: 600 }}>{item.totalCount}</div>
+                              </Col>
+                              <Col flex="100px" style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>已核销</div>
+                                <div style={{ fontSize: 16, fontWeight: 600, color: '#d46b08' }}>{item.usedCount}</div>
+                              </Col>
+                              <Col flex="100px" style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>已退(通过)</div>
+                                <div style={{ fontSize: 16, fontWeight: 600, color: '#389e0d' }}>{item.approvedRefund}</div>
+                              </Col>
+                              <Col flex="100px" style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>待审占用</div>
+                                <div style={{ fontSize: 16, fontWeight: 600, color: '#d46b08' }}>{item.pendingRefund}</div>
+                              </Col>
+                              <Col flex="100px" style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>当前可退</div>
+                                <div style={{ fontSize: 16, fontWeight: 600, color: '#1f4e79' }}>{item.availableCount}</div>
+                              </Col>
+                              <Col flex="140px" style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: 12, color: '#6b7280' }}>已核销金额</div>
+                                <div style={{ fontSize: 14, fontWeight: 600 }}>¥{item.totalRedeemed.toFixed(2)}</div>
+                                <div style={{ fontSize: 12, color: '#389e0d', marginTop: 2 }}>
+                                  已退 ¥{item.totalRefunded.toFixed(2)}
+                                </div>
+                              </Col>
+                              <Col flex="40px" style={{ textAlign: 'center', color: '#9ca3af' }}>
+                                {isExpanded ? '收起 ▲' : '展开 ▼'}
+                              </Col>
+                            </Row>
+
+                            {isExpanded && (
+                              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed #e5e7eb' }}>
+                                <Row gutter={[24, 12]}>
+                                  <Col span={14}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1f4e79', marginBottom: 8 }}>
+                                      全流程时间线
+                                    </div>
+                                    <Timeline
+                                      items={item.timeline.map((t: any) => {
+                                        let color = 'blue';
+                                        if (t.type === 'payment') color = 'green';
+                                        if (t.type === 'redemption') color = 'orange';
+                                        if (t.type === 'refund_approved') color = 'green';
+                                        if (t.type === 'refund_pending') color = 'orange';
+                                        if (t.type === 'refund_rejected') color = 'red';
+                                        return {
+                                          color,
+                                          children: (
+                                            <div>
+                                              <div style={{ fontSize: 12, color: '#9ca3af' }}>{t.time}</div>
+                                              <div style={{ fontWeight: 500 }}>{t.title}</div>
+                                              <div style={{ fontSize: 12, color: '#6b7280' }}>{t.desc}</div>
+                                            </div>
+                                          )
+                                        };
+                                      })}
+                                    />
+                                  </Col>
+                                  <Col span={10}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1f4e79', marginBottom: 8 }}>
+                                      余额计算口径
+                                    </div>
+                                    <Card size="small" style={{ borderRadius: 6, background: '#f0f9ff', border: '1px solid #bfdbfe' }}>
+                                      <div style={{ fontSize: 12, lineHeight: 2 }}>
+                                        <div>
+                                          原始购买次数：<b>{item.originalTotalCount}</b> 次
+                                        </div>
+                                        <div style={{ color: '#389e0d' }}>
+                                          − 已通过退款：<b>{item.approvedRefund}</b> 次 （已扣减卡券总额）
+                                        </div>
+                                        <div style={{ color: '#d46b08' }}>
+                                          − 已核销次数：<b>{item.usedCount}</b> 次 （按核销流水实算）
+                                        </div>
+                                        <div style={{ color: '#d46b08' }}>
+                                          − 待审核退款：<b>{item.pendingRefund}</b> 次 （占用可退额度）
+                                        </div>
+                                        <Divider style={{ margin: '6px 0' }} />
+                                        <div style={{ color: '#1f4e79', fontSize: 14, fontWeight: 600 }}>
+                                          = 当前可退次数：{item.availableCount} 次
+                                          （¥{(item.availableCount * item.unitPrice).toFixed(2)}）
+                                        </div>
+                                      </div>
+                                    </Card>
+                                    <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>
+                                      * 待审核退款在审批通过前仅占用额度，不计入实际退款
+                                      <br />
+                                      * 驳回的退款申请自动释放占用额度
+                                    </div>
+                                  </Col>
+                                </Row>
+                              </div>
+                            )}
+                          </Card>
+                        </Col>
+                      );
+                    })}
+                  </Row>
+
+                  {filteredLedger.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '60px 0', color: '#9ca3af' }}>
+                      暂无匹配的卡券数据
+                    </div>
+                  )}
+                </div>
+              )
+            }
+          ]}
         />
       </Card>
 
@@ -759,12 +1075,17 @@ const RefundPage: React.FC = () => {
               placeholder="搜索 顾客姓名 / 手机号 / 券号 / 项目"
               optionFilterProp="label"
               onChange={handleCouponSelect}
-              options={availableCoupons.map(c => ({
-                value: c.id,
-                label: c.customerName + ' | ' + c.phone + ' | ' + c.couponNo + ' | ' + c.couponName + ' | 剩余' + getActualRemainingCount(c) + '次',
-                customerName: c.customerName,
-                phone: c.phone
-              }))}
+              options={availableCoupons.map(c => {
+                const avail = getAvailableRefundCount(c);
+                const pending = getPendingRefundCount(c.couponNo);
+                const pendingLabel = pending > 0 ? '（待审占用' + pending + '次）' : '';
+                return {
+                  value: c.id,
+                  label: c.customerName + ' | ' + c.phone + ' | ' + c.couponNo + ' | ' + c.couponName + ' | 可退' + avail + '次' + pendingLabel,
+                  customerName: c.customerName,
+                  phone: c.phone
+                };
+              })}
               listHeight={300}
             />
           </Form.Item>
@@ -794,18 +1115,24 @@ const RefundPage: React.FC = () => {
                 </Col>
               </Row>
               <Row gutter={16}>
-                <Col span={6}>
+                <Col span={4}>
                   <Form.Item label="总次数" name="totalCount"><Input disabled /></Form.Item>
                 </Col>
-                <Col span={6}>
-                  <Form.Item label="已用次数" name="usedCount"><Input disabled /></Form.Item>
+                <Col span={4}>
+                  <Form.Item label="已用(核销)" name="usedCount"><Input disabled style={{ color: '#d46b08' }} /></Form.Item>
                 </Col>
-                <Col span={6}>
-                  <Form.Item label="剩余次数（可退上限）" name="remainingCount">
-                    <Input disabled prefix={<span className="amount-positive">可退</span>} />
+                <Col span={4}>
+                  <Form.Item label="已退(通过)" name="approvedRefund"><Input disabled style={{ color: '#389e0d' }} /></Form.Item>
+                </Col>
+                <Col span={4}>
+                  <Form.Item label="待审占用" name="pendingRefund"><Input disabled style={{ color: '#d46b08' }} /></Form.Item>
+                </Col>
+                <Col span={4}>
+                  <Form.Item label="当前可退" name="maxRefundCount">
+                    <Input disabled style={{ color: '#1f4e79', fontWeight: 600 }} prefix={<span>可退</span>} />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
+                <Col span={4}>
                   <Form.Item label="单次价格" name="unitPrice">
                     <Input disabled prefix="¥" />
                   </Form.Item>
@@ -820,9 +1147,9 @@ const RefundPage: React.FC = () => {
                     <InputNumber
                       style={{ width: '100%' }}
                       min={1}
-                      max={createForm.getFieldValue('remainingCount') || 1}
+                      max={createForm.getFieldValue('maxRefundCount') || 1}
                       onChange={onRefundCountChange}
-                      addonAfter={`/ 最多 ${createForm.getFieldValue('remainingCount') || 0} 次`}
+                      addonAfter={'/ 最多 ' + (createForm.getFieldValue('maxRefundCount') || 0) + ' 次'}
                     />
                   </Form.Item>
                 </Col>

@@ -89,6 +89,9 @@ const ReportPage: React.FC = () => {
   const [reportDate, setReportDate] = useState<string>(businessDate);
   const [submitForm] = Form.useForm();
   const [submitOpen, setSubmitOpen] = useState(false);
+  const [auditModuleFilter, setAuditModuleFilter] = useState<string>('');
+  const [auditActionFilter, setAuditActionFilter] = useState<string>('');
+  const [auditKeyword, setAuditKeyword] = useState('');
 
   const todayOrders = useMemo(() => paymentOrders.filter(o => o.date === reportDate), [paymentOrders, reportDate]);
   const todayRedemptions = useMemo(() => redemptions.filter(r => r.date === reportDate), [redemptions, reportDate]);
@@ -462,7 +465,30 @@ const ReportPage: React.FC = () => {
     }
   ];
 
-  const recentAudits = auditTrails.slice(0, 30);
+  const auditModules = useMemo(() => {
+    const set = new Set(auditTrails.map(a => a.module));
+    return Array.from(set).sort();
+  }, [auditTrails]);
+
+  const auditActions = useMemo(() => {
+    const set = new Set(auditTrails.map(a => a.action));
+    return Array.from(set).sort();
+  }, [auditTrails]);
+
+  const filteredAudits = useMemo(() => {
+    return auditTrails.filter(a => {
+      if (auditModuleFilter && a.module !== auditModuleFilter) return false;
+      if (auditActionFilter && a.action !== auditActionFilter) return false;
+      if (auditKeyword) {
+        const kw = auditKeyword.toLowerCase();
+        const hay = a.targetId + ' ' + (a.remark || '') + ' ' + a.operator;
+        if (!hay.toLowerCase().includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [auditTrails, auditModuleFilter, auditActionFilter, auditKeyword]);
+
+  const recentAudits = filteredAudits.slice(0, 30);
 
   return (
     <div>
@@ -694,12 +720,49 @@ const ReportPage: React.FC = () => {
             children: (
               <div style={{ display: 'flex', gap: 16, minHeight: 600 }}>
                 <div style={{ flex: 3, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}>
-                  <div className="section-title" style={{ marginBottom: 16 }}>操作审计日志（最近 500 条）</div>
+                  <div className="section-title" style={{ marginBottom: 12 }}>操作审计日志（最近 500 条）</div>
+                  <Row gutter={[8, 8]} style={{ marginBottom: 12 }} align="middle">
+                    <Col span={5}>
+                      <Select
+                        size="small"
+                        style={{ width: '100%' }}
+                        allowClear
+                        placeholder="按模块筛选"
+                        value={auditModuleFilter || undefined}
+                        onChange={v => setAuditModuleFilter(v || '')}
+                        options={auditModules.map(m => ({ value: m, label: m }))}
+                      />
+                    </Col>
+                    <Col span={5}>
+                      <Select
+                        size="small"
+                        style={{ width: '100%' }}
+                        allowClear
+                        placeholder="按动作筛选"
+                        value={auditActionFilter || undefined}
+                        onChange={v => setAuditActionFilter(v || '')}
+                        options={auditActions.map(a => ({ value: a, label: a }))}
+                      />
+                    </Col>
+                    <Col span={10}>
+                      <Input
+                        size="small"
+                        prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
+                        placeholder="搜索 券号/退款单号/操作人/说明"
+                        value={auditKeyword}
+                        onChange={e => setAuditKeyword(e.target.value)}
+                        allowClear
+                      />
+                    </Col>
+                    <Col span={4} style={{ textAlign: 'right', color: '#6b7280', fontSize: 12 }}>
+                      筛选结果：{filteredAudits.length} 条
+                    </Col>
+                  </Row>
                   <Table
                     size="small"
-                    dataSource={recentAudits.map(a => ({ ...a, key: a.id }))}
+                    dataSource={filteredAudits.map(a => ({ ...a, key: a.id }))}
                     pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条记录` }}
-                    scroll={{ y: 520 }}
+                    scroll={{ y: 460 }}
                     columns={[
                       { title: '时间', dataIndex: 'timestamp', width: 160,
                         render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm:ss')
