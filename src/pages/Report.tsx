@@ -498,6 +498,47 @@ const ReportPage: React.FC = () => {
     const endStr = selectedMonth + '-' + String(endDay).padStart(2, '0');
     const daysInMonth = endDay;
 
+    const histPaid = new Map<string, number>();
+    const histRedeemed = new Map<string, number>();
+    const histApproved = new Map<string, number>();
+
+    paymentOrders.forEach(o => {
+      if (o.date <= endStr) {
+        const d = o.date.slice(0, 7) === selectedMonth ? o.date : o.date;
+        histPaid.set(d, (histPaid.get(d) || 0) + o.paidAmount);
+      }
+    });
+    redemptions.forEach(r => {
+      if (r.date <= endStr) {
+        histRedeemed.set(r.date, (histRedeemed.get(r.date) || 0) + r.amount);
+      }
+    });
+    refunds.filter(r => r.auditStatus === 'approved').forEach(r => {
+      if (r.date <= endStr) {
+        histApproved.set(r.date, (histApproved.get(r.date) || 0) + r.refundAmount);
+      }
+    });
+
+    const allDates: string[] = [];
+    const minDate = dayjs(selectedMonth).subtract(12, 'month').format('YYYY-MM-DD');
+    const minStr = minDate;
+    const dStart = dayjs(minStr);
+    const dEnd = dayjs(endStr);
+    for (let d = dStart; d.isBefore(dEnd) || d.isSame(dEnd, 'day'); d = d.add(1, 'day')) {
+      allDates.push(d.format('YYYY-MM-DD'));
+    }
+
+    let cumPaid = 0;
+    let cumRedeemed = 0;
+    let cumApproved = 0;
+    let cumSedimentByEndOf = new Map<string, number>();
+    allDates.forEach(date => {
+      cumPaid += histPaid.get(date) || 0;
+      cumRedeemed += histRedeemed.get(date) || 0;
+      cumApproved += histApproved.get(date) || 0;
+      cumSedimentByEndOf.set(date, Number((cumPaid - cumRedeemed - cumApproved).toFixed(2)));
+    });
+
     const dayMap = new Map<string, any>();
     for (let i = 1; i <= daysInMonth; i++) {
       const d = selectedMonth + '-' + String(i).padStart(2, '0');
@@ -512,7 +553,8 @@ const ReportPage: React.FC = () => {
         pendingRefundCount: 0,
         pendingRefundAmount: 0,
         discrepancyCount: 0,
-        netIncome: 0
+        netIncome: 0,
+        sedimentEndOfDay: cumSedimentByEndOf.get(d) || 0
       });
     }
 
@@ -569,6 +611,26 @@ const ReportPage: React.FC = () => {
     const endDay = dayjs(selectedMonth).daysInMonth();
     const endStr = selectedMonth + '-' + String(endDay).padStart(2, '0');
 
+    const storeCumPaid = new Map<string, number>();
+    const storeCumRedeemed = new Map<string, number>();
+    const storeCumApproved = new Map<string, number>();
+
+    paymentOrders.forEach(o => {
+      if (o.date <= endStr) {
+        storeCumPaid.set(o.salesStore, (storeCumPaid.get(o.salesStore) || 0) + o.paidAmount);
+      }
+    });
+    redemptions.forEach(r => {
+      if (r.date <= endStr) {
+        storeCumRedeemed.set(r.serviceStore, (storeCumRedeemed.get(r.serviceStore) || 0) + r.amount);
+      }
+    });
+    refunds.filter(r => r.auditStatus === 'approved').forEach(r => {
+      if (r.date <= endStr) {
+        storeCumApproved.set(r.soldStore, (storeCumApproved.get(r.soldStore) || 0) + r.refundAmount);
+      }
+    });
+
     const map = new Map<string, any>();
     meta.stores.forEach(s => map.set(s, {
       store: s,
@@ -580,7 +642,8 @@ const ReportPage: React.FC = () => {
       approvedRefundAmount: 0,
       pendingRefundCount: 0,
       pendingRefundAmount: 0,
-      netIncome: 0
+      netIncome: 0,
+      sedimentEndOfMonth: Number(((storeCumPaid.get(s) || 0) - (storeCumRedeemed.get(s) || 0) - (storeCumApproved.get(s) || 0)).toFixed(2))
     }));
 
     paymentOrders.forEach(o => {
@@ -627,18 +690,45 @@ const ReportPage: React.FC = () => {
     const endDay = dayjs(selectedMonth).daysInMonth();
     const endStr = selectedMonth + '-' + String(endDay).padStart(2, '0');
 
+    const catCumPaid = new Map<string, number>();
+    const catCumRedeemed = new Map<string, number>();
+    const catCumApproved = new Map<string, number>();
+
+    paymentOrders.forEach(o => {
+      if (o.date <= endStr) {
+        const cat = o.projectCategory || '未分类';
+        catCumPaid.set(cat, (catCumPaid.get(cat) || 0) + o.paidAmount);
+      }
+    });
+    redemptions.forEach(r => {
+      if (r.date <= endStr) {
+        const cat = r.projectCategory || '未分类';
+        catCumRedeemed.set(cat, (catCumRedeemed.get(cat) || 0) + r.amount);
+      }
+    });
+    refunds.filter(r => r.auditStatus === 'approved').forEach(r => {
+      if (r.date <= endStr) {
+        const coupon = coupons.find(c => c.couponNo === r.couponNo);
+        const cat = coupon?.projectCategory || '未分类';
+        catCumApproved.set(cat, (catCumApproved.get(cat) || 0) + r.refundAmount);
+      }
+    });
+
     const map = new Map<string, any>();
 
     coupons.forEach(c => {
       if (!map.has(c.projectCategory)) {
+        const cat = c.projectCategory || '未分类';
         map.set(c.projectCategory, {
-          category: c.projectCategory || '未分类',
+          category: cat,
           couponCount: 0,
           totalCount: 0,
           totalAmount: 0,
           paidAmount: 0,
           redeemedAmount: 0,
-          refundedAmount: 0
+          refundedAmount: 0,
+          netIncome: 0,
+          sedimentEndOfMonth: Number(((catCumPaid.get(cat) || 0) - (catCumRedeemed.get(cat) || 0) - (catCumApproved.get(cat) || 0)).toFixed(2))
         });
       }
     });
@@ -647,7 +737,11 @@ const ReportPage: React.FC = () => {
       if (o.date >= startStr && o.date <= endStr) {
         const cat = o.projectCategory || '未分类';
         if (!map.has(cat)) {
-          map.set(cat, { category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0 });
+          map.set(cat, {
+            category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0,
+            redeemedAmount: 0, refundedAmount: 0, netIncome: 0,
+            sedimentEndOfMonth: Number(((catCumPaid.get(cat) || 0) - (catCumRedeemed.get(cat) || 0) - (catCumApproved.get(cat) || 0)).toFixed(2))
+          });
         }
         const s = map.get(cat)!;
         s.couponCount += 1;
@@ -659,7 +753,11 @@ const ReportPage: React.FC = () => {
       if (r.date >= startStr && r.date <= endStr) {
         const cat = r.projectCategory || '未分类';
         if (!map.has(cat)) {
-          map.set(cat, { category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0 });
+          map.set(cat, {
+            category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0,
+            redeemedAmount: 0, refundedAmount: 0, netIncome: 0,
+            sedimentEndOfMonth: Number(((catCumPaid.get(cat) || 0) - (catCumRedeemed.get(cat) || 0) - (catCumApproved.get(cat) || 0)).toFixed(2))
+          });
         }
         const s = map.get(cat)!;
         s.redeemedAmount += r.amount;
@@ -671,7 +769,11 @@ const ReportPage: React.FC = () => {
         const coupon = coupons.find(c => c.couponNo === r.couponNo);
         const cat = coupon?.projectCategory || '未分类';
         if (!map.has(cat)) {
-          map.set(cat, { category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0 });
+          map.set(cat, {
+            category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0,
+            redeemedAmount: 0, refundedAmount: 0, netIncome: 0,
+            sedimentEndOfMonth: Number(((catCumPaid.get(cat) || 0) - (catCumRedeemed.get(cat) || 0) - (catCumApproved.get(cat) || 0)).toFixed(2))
+          });
         }
         const s = map.get(cat)!;
         s.refundedAmount += r.refundAmount;
@@ -687,8 +789,152 @@ const ReportPage: React.FC = () => {
     }));
   }, [selectedMonth, paymentOrders, redemptions, refunds, coupons]);
 
+  const lastMonth = dayjs(selectedMonth).subtract(1, 'month').format('YYYY-MM');
+
+  const lastMonthStoreStats = useMemo(() => {
+    const startStr = lastMonth + '-01';
+    const endDay = dayjs(lastMonth).daysInMonth();
+    const endStr = lastMonth + '-' + String(endDay).padStart(2, '0');
+
+    const map = new Map<string, any>();
+    meta.stores.forEach(s => map.set(s, {
+      store: s,
+      paidAmount: 0,
+      redeemedAmount: 0,
+      approvedRefundAmount: 0,
+      netIncome: 0
+    }));
+
+    paymentOrders.forEach(o => {
+      if (o.date >= startStr && o.date <= endStr && map.has(o.salesStore)) {
+        map.get(o.salesStore)!.paidAmount += o.paidAmount;
+      }
+    });
+    redemptions.forEach(r => {
+      if (r.date >= startStr && r.date <= endStr && map.has(r.serviceStore)) {
+        map.get(r.serviceStore)!.redeemedAmount += r.amount;
+      }
+    });
+    refunds.filter(r => r.auditStatus === 'approved').forEach(r => {
+      if (r.date >= startStr && r.date <= endStr && map.has(r.soldStore)) {
+        map.get(r.soldStore)!.approvedRefundAmount += r.refundAmount;
+      }
+    });
+
+    return Array.from(map.values()).map(s => ({
+      ...s,
+      paidAmount: Number(s.paidAmount.toFixed(2)),
+      redeemedAmount: Number(s.redeemedAmount.toFixed(2)),
+      approvedRefundAmount: Number(s.approvedRefundAmount.toFixed(2)),
+      netIncome: Number((s.paidAmount - s.approvedRefundAmount).toFixed(2))
+    }));
+  }, [lastMonth, paymentOrders, redemptions, refunds, meta.stores]);
+
+  const lastMonthCategoryStats = useMemo(() => {
+    const startStr = lastMonth + '-01';
+    const endDay = dayjs(lastMonth).daysInMonth();
+    const endStr = lastMonth + '-' + String(endDay).padStart(2, '0');
+
+    const map = new Map<string, any>();
+
+    paymentOrders.forEach(o => {
+      if (o.date >= startStr && o.date <= endStr) {
+        const cat = o.projectCategory || '未分类';
+        if (!map.has(cat)) map.set(cat, { category: cat, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0, netIncome: 0 });
+        map.get(cat)!.paidAmount += o.paidAmount;
+      }
+    });
+    redemptions.forEach(r => {
+      if (r.date >= startStr && r.date <= endStr) {
+        const cat = r.projectCategory || '未分类';
+        if (!map.has(cat)) map.set(cat, { category: cat, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0, netIncome: 0 });
+        map.get(cat)!.redeemedAmount += r.amount;
+      }
+    });
+    refunds.filter(r => r.auditStatus === 'approved').forEach(r => {
+      if (r.date >= startStr && r.date <= endStr) {
+        const coupon = coupons.find(c => c.couponNo === r.couponNo);
+        const cat = coupon?.projectCategory || '未分类';
+        if (!map.has(cat)) map.set(cat, { category: cat, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0, netIncome: 0 });
+        map.get(cat)!.refundedAmount += r.refundAmount;
+      }
+    });
+
+    return Array.from(map.values()).map(s => ({
+      ...s,
+      paidAmount: Number(s.paidAmount.toFixed(2)),
+      redeemedAmount: Number(s.redeemedAmount.toFixed(2)),
+      refundedAmount: Number(s.refundedAmount.toFixed(2)),
+      netIncome: Number((s.paidAmount - s.refundedAmount).toFixed(2))
+    }));
+  }, [lastMonth, paymentOrders, redemptions, refunds, coupons]);
+
+  const calcChange = (cur: number, prev: number) => {
+    if (prev === 0) return { change: cur === 0 ? 0 : 999, isLarge: Math.abs(cur) > 0, isUp: cur > 0 };
+    const change = ((cur - prev) / Math.abs(prev)) * 100;
+    return {
+      change: Number(change.toFixed(1)),
+      isLarge: Math.abs(change) >= 20,
+      isUp: change > 0
+    };
+  };
+
+  const storeCompare = useMemo(() => {
+    const lastMap = new Map(lastMonthStoreStats.map(s => [s.store, s]));
+    return monthStoreStats.map(cur => {
+      const prev = lastMap.get(cur.store) || { paidAmount: 0, redeemedAmount: 0, approvedRefundAmount: 0, netIncome: 0 };
+      const paidChg = calcChange(cur.paidAmount, prev.paidAmount);
+      const redeemChg = calcChange(cur.redeemedAmount, prev.redeemedAmount);
+      const refundChg = calcChange(cur.approvedRefundAmount, prev.approvedRefundAmount);
+      const netChg = calcChange(cur.netIncome, prev.netIncome);
+      const largeCount = [paidChg, redeemChg, refundChg, netChg].filter(c => c.isLarge).length;
+      return {
+        ...cur,
+        prevPaid: prev.paidAmount,
+        prevRedeemed: prev.redeemedAmount,
+        prevRefund: prev.approvedRefundAmount,
+        prevNet: prev.netIncome,
+        paidChg, redeemChg, refundChg, netChg,
+        largeCount,
+        flag: largeCount >= 2
+      };
+    }).sort((a, b) => b.largeCount - a.largeCount);
+  }, [monthStoreStats, lastMonthStoreStats]);
+
+  const categoryCompare = useMemo(() => {
+    const lastMap = new Map(lastMonthCategoryStats.map(s => [s.category, s]));
+    const allCats = new Set([...monthCategoryStats.map(s => s.category), ...lastMonthCategoryStats.map(s => s.category)]);
+    const rows: any[] = [];
+    allCats.forEach(cat => {
+      const cur = monthCategoryStats.find(s => s.category === cat) || { category: cat, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0, netIncome: 0 };
+      const prev = lastMap.get(cat) || { paidAmount: 0, redeemedAmount: 0, refundedAmount: 0, netIncome: 0 };
+      const paidChg = calcChange(cur.paidAmount, prev.paidAmount);
+      const redeemChg = calcChange(cur.redeemedAmount, prev.redeemedAmount);
+      const refundChg = calcChange(cur.refundedAmount, prev.refundedAmount);
+      const netChg = calcChange(cur.netIncome, prev.netIncome);
+      const largeCount = [paidChg, redeemChg, refundChg, netChg].filter(c => c.isLarge).length;
+      rows.push({
+        category: cat,
+        curPaid: cur.paidAmount,
+        curRedeemed: cur.redeemedAmount,
+        curRefund: cur.refundedAmount,
+        curNet: cur.netIncome,
+        prevPaid: prev.paidAmount,
+        prevRedeemed: prev.redeemedAmount,
+        prevRefund: prev.refundedAmount,
+        prevNet: prev.netIncome,
+        paidChg, redeemChg, refundChg, netChg,
+        largeCount,
+        flag: largeCount >= 2
+      });
+    });
+    return rows.sort((a, b) => b.largeCount - a.largeCount);
+  }, [monthCategoryStats, lastMonthCategoryStats]);
+
   const monthSummary = useMemo(() => {
     const days = monthDailyStats;
+    const lastDay = [...days].sort((a, b) => b.date.localeCompare(a.date))[0];
+    const totalSediment = lastDay ? lastDay.sedimentEndOfDay : 0;
     return {
       totalDays: days.filter(d => d.orderCount > 0 || d.redemptionCount > 0).length,
       totalOrders: days.reduce((s, d) => s + d.orderCount, 0),
@@ -700,7 +946,8 @@ const ReportPage: React.FC = () => {
       totalPendingRefunds: days.reduce((s, d) => s + d.pendingRefundCount, 0),
       totalPendingRefundAmount: Number(days.reduce((s, d) => s + d.pendingRefundAmount, 0).toFixed(2)),
       totalDiscrepancies: days.reduce((s, d) => s + d.discrepancyCount, 0),
-      totalNetIncome: Number(days.reduce((s, d) => s + d.netIncome, 0).toFixed(2))
+      totalNetIncome: Number(days.reduce((s, d) => s + d.netIncome, 0).toFixed(2)),
+      totalSediment: Number(totalSediment.toFixed(2))
     };
   }, [monthDailyStats]);
 
@@ -719,7 +966,8 @@ const ReportPage: React.FC = () => {
       '待审核退款笔数': monthSummary.totalPendingRefunds,
       '待审核退款金额(元)': monthSummary.totalPendingRefundAmount,
       '差异笔数': monthSummary.totalDiscrepancies,
-      '净收入(元)': monthSummary.totalNetIncome
+      '净收入(元)': monthSummary.totalNetIncome,
+      '月底沉淀金额(元)': monthSummary.totalSediment
     }];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), '月度汇总');
 
@@ -734,7 +982,8 @@ const ReportPage: React.FC = () => {
       '待审核退款笔数': d.pendingRefundCount,
       '待审核退款金额(元)': d.pendingRefundAmount,
       '差异笔数': d.discrepancyCount,
-      '净收入(元)': d.netIncome
+      '净收入(元)': d.netIncome,
+      '当日沉淀(元)': d.sedimentEndOfDay
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dailyData), '每日明细');
 
@@ -748,7 +997,8 @@ const ReportPage: React.FC = () => {
       '已通过退款金额(元)': s.approvedRefundAmount,
       '待审核退款笔数': s.pendingRefundCount,
       '待审核退款金额(元)': s.pendingRefundAmount,
-      '净收入(元)': s.netIncome
+      '净收入(元)': s.netIncome,
+      '月底沉淀(元)': s.sedimentEndOfMonth
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(storeData), '门店维度');
 
@@ -758,7 +1008,8 @@ const ReportPage: React.FC = () => {
       '收款金额(元)': c.paidAmount,
       '核销金额(元)': c.redeemedAmount,
       '已退金额(元)': c.refundedAmount,
-      '净收入(元)': c.netIncome
+      '净收入(元)': c.netIncome,
+      '月底沉淀(元)': c.sedimentEndOfMonth
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(categoryData), '项目类别维度');
 
@@ -959,12 +1210,14 @@ const ReportPage: React.FC = () => {
                     </Card>
                   </Col>
                   <Col span={4}>
-                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #8b5cf6' }}>
+                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #dc2626' }}>
                       <Statistic
-                        title={<span style={{ fontSize: 12, color: '#6b7280' }}>待处理差异</span>}
-                        value={monthSummary.totalDiscrepancies}
-                        suffix="笔"
-                        valueStyle={{ color: '#8b5cf6', fontSize: 20 }}
+                        title={<span style={{ fontSize: 12, color: '#6b7280' }}><AlertOutlined /> 月底沉淀金额</span>}
+                        prefix="¥"
+                        value={monthSummary.totalSediment / 10000}
+                        precision={2}
+                        suffix="万"
+                        valueStyle={{ color: '#dc2626', fontSize: 20 }}
                       />
                     </Card>
                   </Col>
@@ -1010,6 +1263,9 @@ const ReportPage: React.FC = () => {
                       { title: '差异数', dataIndex: 'discrepancyCount', width: 75, align: 'center' as const,
                         render: (v: number) => v > 0 ? <Tag color="purple">{v}</Tag> : '—'
                       },
+                      { title: '当日沉淀', dataIndex: 'sedimentEndOfDay', width: 120, align: 'right' as const,
+                        render: (v: number) => <Text strong style={{ color: v < 0 ? '#dc2626' : '#dc2626' }}>¥{v.toFixed(2)}</Text>
+                      },
                       { title: '净收入', dataIndex: 'netIncome', width: 110, align: 'right' as const, fixed: 'right' as const,
                         render: (v: number) => <Text strong style={{ color: '#0d9488' }}>¥{v.toFixed(2)}</Text>
                       }
@@ -1032,19 +1288,22 @@ const ReportPage: React.FC = () => {
                         scroll={{ y: 320 }}
                         columns={[
                           { title: '门店', dataIndex: 'store', width: 100 },
-                          { title: '收款', dataIndex: 'paidAmount', width: 100, align: 'right' as const,
+                          { title: '收款', dataIndex: 'paidAmount', width: 90, align: 'right' as const,
                             render: (v: number) => `¥${v.toFixed(2)}`
                           },
-                          { title: '核销', dataIndex: 'redeemedAmount', width: 100, align: 'right' as const,
+                          { title: '核销', dataIndex: 'redeemedAmount', width: 90, align: 'right' as const,
                             render: (v: number) => `¥${v.toFixed(2)}`
                           },
-                          { title: '已退', dataIndex: 'approvedRefundAmount', width: 90, align: 'right' as const,
+                          { title: '已退', dataIndex: 'approvedRefundAmount', width: 85, align: 'right' as const,
                             render: (v: number) => <span style={{ color: '#16a34a' }}>-¥{v.toFixed(2)}</span>
                           },
-                          { title: '待审', dataIndex: 'pendingRefundAmount', width: 90, align: 'right' as const,
+                          { title: '待审', dataIndex: 'pendingRefundAmount', width: 85, align: 'right' as const,
                             render: (v: number) => <span style={{ color: '#dc2626' }}>¥{v.toFixed(2)}</span>
                           },
-                          { title: '净收入', dataIndex: 'netIncome', width: 100, align: 'right' as const,
+                          { title: '月底沉淀', dataIndex: 'sedimentEndOfMonth', width: 100, align: 'right' as const,
+                            render: (v: number) => <Text strong style={{ color: '#dc2626' }}>¥{v.toFixed(2)}</Text>
+                          },
+                          { title: '净收入', dataIndex: 'netIncome', width: 95, align: 'right' as const,
                             render: (v: number) => <Text strong style={{ color: '#0d9488' }}>¥{v.toFixed(2)}</Text>
                           }
                         ]}
@@ -1068,6 +1327,11 @@ const ReportPage: React.FC = () => {
                               </span>
                             </Table.Summary.Cell>
                             <Table.Summary.Cell index={5} align="right">
+                              <span style={{ color: '#dc2626' }}>
+                                ¥{monthStoreStats.reduce((s, d) => s + d.sedimentEndOfMonth, 0).toFixed(2)}
+                              </span>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={6} align="right">
                               <span style={{ color: '#0d9488' }}>
                                 ¥{monthStoreStats.reduce((s, d) => s + d.netIncome, 0).toFixed(2)}
                               </span>
@@ -1091,17 +1355,20 @@ const ReportPage: React.FC = () => {
                         scroll={{ y: 320 }}
                         columns={[
                           { title: '项目类别', dataIndex: 'category', width: 130 },
-                          { title: '卡券数', dataIndex: 'couponCount', width: 70, align: 'center' as const },
-                          { title: '收款金额', dataIndex: 'paidAmount', width: 110, align: 'right' as const,
+                          { title: '卡券数', dataIndex: 'couponCount', width: 65, align: 'center' as const },
+                          { title: '收款金额', dataIndex: 'paidAmount', width: 100, align: 'right' as const,
                             render: (v: number) => <span style={{ color: '#2563eb' }}>¥{v.toFixed(2)}</span>
                           },
-                          { title: '核销金额', dataIndex: 'redeemedAmount', width: 110, align: 'right' as const,
+                          { title: '核销金额', dataIndex: 'redeemedAmount', width: 100, align: 'right' as const,
                             render: (v: number) => `¥${v.toFixed(2)}`
                           },
-                          { title: '已退金额', dataIndex: 'refundedAmount', width: 100, align: 'right' as const,
+                          { title: '已退金额', dataIndex: 'refundedAmount', width: 90, align: 'right' as const,
                             render: (v: number) => <span style={{ color: '#16a34a' }}>-¥{v.toFixed(2)}</span>
                           },
-                          { title: '净收入', dataIndex: 'netIncome', width: 110, align: 'right' as const,
+                          { title: '月底沉淀', dataIndex: 'sedimentEndOfMonth', width: 100, align: 'right' as const,
+                            render: (v: number) => <Text strong style={{ color: '#dc2626' }}>¥{v.toFixed(2)}</Text>
+                          },
+                          { title: '净收入', dataIndex: 'netIncome', width: 105, align: 'right' as const,
                             render: (v: number) => <Text strong style={{ color: '#0d9488' }}>¥{v.toFixed(2)}</Text>
                           }
                         ]}
@@ -1123,6 +1390,11 @@ const ReportPage: React.FC = () => {
                               </span>
                             </Table.Summary.Cell>
                             <Table.Summary.Cell index={5} align="right">
+                              <span style={{ color: '#dc2626' }}>
+                                ¥{monthCategoryStats.reduce((s, d) => s + d.sedimentEndOfMonth, 0).toFixed(2)}
+                              </span>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={6} align="right">
                               <span style={{ color: '#0d9488' }}>
                                 ¥{monthCategoryStats.reduce((s, d) => s + d.netIncome, 0).toFixed(2)}
                               </span>
@@ -1133,6 +1405,212 @@ const ReportPage: React.FC = () => {
                     </Card>
                   </Col>
                 </Row>
+
+                <div style={{ marginTop: 16 }}>
+                  <Card
+                    title={
+                      <Space>
+                        <span><RiseOutlined /> 月度环比分析</span>
+                        <Tag color="blue">对比 {lastMonth}</Tag>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          * 波动 ≥±20% 标黄，2项及以上异常标红
+                        </Text>
+                      </Space>
+                    }
+                    size="small"
+                    style={{ borderRadius: 8, marginBottom: 16 }}
+                  >
+                    <Row gutter={[16, 16]}>
+                      <Col span={12}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#1f4e79' }}>
+                          门店维度环比
+                        </div>
+                        <Table
+                          size="small"
+                          dataSource={storeCompare.map((s, i) => ({ ...s, key: s.store }))}
+                          pagination={false}
+                          scroll={{ y: 300 }}
+                          rowClassName={(r: any) => r.flag ? 'row-flagged' : ''}
+                          columns={[
+                            { title: '门店', dataIndex: 'store', width: 100,
+                              render: (v: string, r: any) => (
+                                <Space>
+                                  {r.flag && <Tag color="red" style={{ margin: 0 }}>异常</Tag>}
+                                  <Text strong={r.flag}>{v}</Text>
+                                </Space>
+                              )
+                            },
+                            {
+                              title: '收款(万)', width: 140, align: 'right' as const,
+                              render: (_: any, r: any) => (
+                                <div>
+                                  <div>¥{(r.paidAmount / 10000).toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, marginTop: 2 }}>
+                                    <span style={{ color: '#9ca3af' }}>上月¥{(r.prevPaid / 10000).toFixed(2)}</span>
+                                    {' '}
+                                    {r.paidChg.change !== 0 && (
+                                      <span style={{
+                                        color: r.paidChg.isUp ? '#16a34a' : '#dc2626',
+                                        background: r.paidChg.isLarge ? '#fef3c7' : 'transparent',
+                                        padding: '0 4px',
+                                        borderRadius: 3,
+                                        fontWeight: r.paidChg.isLarge ? 600 : 400
+                                      }}>
+                                        {r.paidChg.isUp ? '↑' : '↓'}{Math.abs(r.paidChg.change) >= 999 ? '新增' : Math.abs(r.paidChg.change) + '%'}
+                                        {r.paidChg.isLarge && '⚠'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            },
+                            {
+                              title: '核销(万)', width: 140, align: 'right' as const,
+                              render: (_: any, r: any) => (
+                                <div>
+                                  <div>¥{(r.redeemedAmount / 10000).toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, marginTop: 2 }}>
+                                    <span style={{ color: '#9ca3af' }}>上月¥{(r.prevRedeemed / 10000).toFixed(2)}</span>
+                                    {' '}
+                                    {r.redeemChg.change !== 0 && (
+                                      <span style={{
+                                        color: r.redeemChg.isUp ? '#16a34a' : '#dc2626',
+                                        background: r.redeemChg.isLarge ? '#fef3c7' : 'transparent',
+                                        padding: '0 4px',
+                                        borderRadius: 3,
+                                        fontWeight: r.redeemChg.isLarge ? 600 : 400
+                                      }}>
+                                        {r.redeemChg.isUp ? '↑' : '↓'}{Math.abs(r.redeemChg.change) >= 999 ? '新增' : Math.abs(r.redeemChg.change) + '%'}
+                                        {r.redeemChg.isLarge && '⚠'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            },
+                            {
+                              title: '净收入(万)', width: 140, align: 'right' as const,
+                              render: (_: any, r: any) => (
+                                <div>
+                                  <div style={{ fontWeight: 600, color: '#0d9488' }}>¥{(r.netIncome / 10000).toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, marginTop: 2 }}>
+                                    <span style={{ color: '#9ca3af' }}>上月¥{(r.prevNet / 10000).toFixed(2)}</span>
+                                    {' '}
+                                    {r.netChg.change !== 0 && (
+                                      <span style={{
+                                        color: r.netChg.isUp ? '#16a34a' : '#dc2626',
+                                        background: r.netChg.isLarge ? '#fef3c7' : 'transparent',
+                                        padding: '0 4px',
+                                        borderRadius: 3,
+                                        fontWeight: r.netChg.isLarge ? 600 : 400
+                                      }}>
+                                        {r.netChg.isUp ? '↑' : '↓'}{Math.abs(r.netChg.change) >= 999 ? '新增' : Math.abs(r.netChg.change) + '%'}
+                                        {r.netChg.isLarge && '⚠'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            }
+                          ]}
+                        />
+                      </Col>
+                      <Col span={12}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#1f4e79' }}>
+                          项目类别维度环比
+                        </div>
+                        <Table
+                          size="small"
+                          dataSource={categoryCompare.map((c, i) => ({ ...c, key: c.category }))}
+                          pagination={false}
+                          scroll={{ y: 300 }}
+                          columns={[
+                            { title: '项目类别', dataIndex: 'category', width: 110,
+                              render: (v: string, r: any) => (
+                                <Space>
+                                  {r.flag && <Tag color="red" style={{ margin: 0 }}>异常</Tag>}
+                                  <Text strong={r.flag}>{v}</Text>
+                                </Space>
+                              )
+                            },
+                            {
+                              title: '收款(万)', width: 140, align: 'right' as const,
+                              render: (_: any, r: any) => (
+                                <div>
+                                  <div>¥{(r.curPaid / 10000).toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, marginTop: 2 }}>
+                                    <span style={{ color: '#9ca3af' }}>上月¥{(r.prevPaid / 10000).toFixed(2)}</span>
+                                    {' '}
+                                    {r.paidChg.change !== 0 && (
+                                      <span style={{
+                                        color: r.paidChg.isUp ? '#16a34a' : '#dc2626',
+                                        background: r.paidChg.isLarge ? '#fef3c7' : 'transparent',
+                                        padding: '0 4px',
+                                        borderRadius: 3,
+                                        fontWeight: r.paidChg.isLarge ? 600 : 400
+                                      }}>
+                                        {r.paidChg.isUp ? '↑' : '↓'}{Math.abs(r.paidChg.change) >= 999 ? '新增' : Math.abs(r.paidChg.change) + '%'}
+                                        {r.paidChg.isLarge && '⚠'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            },
+                            {
+                              title: '核销(万)', width: 140, align: 'right' as const,
+                              render: (_: any, r: any) => (
+                                <div>
+                                  <div>¥{(r.curRedeemed / 10000).toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, marginTop: 2 }}>
+                                    <span style={{ color: '#9ca3af' }}>上月¥{(r.prevRedeemed / 10000).toFixed(2)}</span>
+                                    {' '}
+                                    {r.redeemChg.change !== 0 && (
+                                      <span style={{
+                                        color: r.redeemChg.isUp ? '#16a34a' : '#dc2626',
+                                        background: r.redeemChg.isLarge ? '#fef3c7' : 'transparent',
+                                        padding: '0 4px',
+                                        borderRadius: 3,
+                                        fontWeight: r.redeemChg.isLarge ? 600 : 400
+                                      }}>
+                                        {r.redeemChg.isUp ? '↑' : '↓'}{Math.abs(r.redeemChg.change) >= 999 ? '新增' : Math.abs(r.redeemChg.change) + '%'}
+                                        {r.redeemChg.isLarge && '⚠'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            },
+                            {
+                              title: '净收入(万)', width: 140, align: 'right' as const,
+                              render: (_: any, r: any) => (
+                                <div>
+                                  <div style={{ fontWeight: 600, color: '#0d9488' }}>¥{(r.curNet / 10000).toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, marginTop: 2 }}>
+                                    <span style={{ color: '#9ca3af' }}>上月¥{(r.prevNet / 10000).toFixed(2)}</span>
+                                    {' '}
+                                    {r.netChg.change !== 0 && (
+                                      <span style={{
+                                        color: r.netChg.isUp ? '#16a34a' : '#dc2626',
+                                        background: r.netChg.isLarge ? '#fef3c7' : 'transparent',
+                                        padding: '0 4px',
+                                        borderRadius: 3,
+                                        fontWeight: r.netChg.isLarge ? 600 : 400
+                                      }}>
+                                        {r.netChg.isUp ? '↑' : '↓'}{Math.abs(r.netChg.change) >= 999 ? '新增' : Math.abs(r.netChg.change) + '%'}
+                                        {r.netChg.isLarge && '⚠'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            }
+                          ]}
+                        />
+                      </Col>
+                    </Row>
+                  </Card>
+                </div>
               </div>
             )
           },
