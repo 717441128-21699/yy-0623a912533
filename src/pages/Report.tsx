@@ -46,7 +46,8 @@ import {
   RiseOutlined,
   FilterOutlined,
   UserOutlined,
-  ExclamationCircleOutlined
+  ExclamationCircleOutlined,
+  ShopOutlined
 } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
@@ -92,6 +93,7 @@ const ReportPage: React.FC = () => {
   const [auditModuleFilter, setAuditModuleFilter] = useState<string>('');
   const [auditActionFilter, setAuditActionFilter] = useState<string>('');
   const [auditKeyword, setAuditKeyword] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState<string>(dayjs(businessDate).format('YYYY-MM'));
 
   const todayOrders = useMemo(() => paymentOrders.filter(o => o.date === reportDate), [paymentOrders, reportDate]);
   const todayRedemptions = useMemo(() => redemptions.filter(r => r.date === reportDate), [redemptions, reportDate]);
@@ -490,6 +492,280 @@ const ReportPage: React.FC = () => {
 
   const recentAudits = filteredAudits.slice(0, 30);
 
+  const monthDailyStats = useMemo(() => {
+    const startStr = selectedMonth + '-01';
+    const endDay = dayjs(selectedMonth).daysInMonth();
+    const endStr = selectedMonth + '-' + String(endDay).padStart(2, '0');
+    const daysInMonth = endDay;
+
+    const dayMap = new Map<string, any>();
+    for (let i = 1; i <= daysInMonth; i++) {
+      const d = selectedMonth + '-' + String(i).padStart(2, '0');
+      dayMap.set(d, {
+        date: d,
+        orderCount: 0,
+        paidAmount: 0,
+        redemptionCount: 0,
+        redeemedAmount: 0,
+        approvedRefundCount: 0,
+        approvedRefundAmount: 0,
+        pendingRefundCount: 0,
+        pendingRefundAmount: 0,
+        discrepancyCount: 0,
+        netIncome: 0
+      });
+    }
+
+    paymentOrders.forEach(o => {
+      if (o.date >= startStr && o.date <= endStr && dayMap.has(o.date)) {
+        const d = dayMap.get(o.date)!;
+        d.orderCount += 1;
+        d.paidAmount += o.paidAmount;
+      }
+    });
+
+    redemptions.forEach(r => {
+      if (r.date >= startStr && r.date <= endStr && dayMap.has(r.date)) {
+        const d = dayMap.get(r.date)!;
+        d.redemptionCount += r.redemptionCount || 1;
+        d.redeemedAmount += r.amount;
+      }
+    });
+
+    refunds.forEach(r => {
+      if (r.date >= startStr && r.date <= endStr && dayMap.has(r.date)) {
+        const d = dayMap.get(r.date)!;
+        if (r.auditStatus === 'approved') {
+          d.approvedRefundCount += 1;
+          d.approvedRefundAmount += r.refundAmount;
+        } else if (r.auditStatus === 'pending') {
+          d.pendingRefundCount += 1;
+          d.pendingRefundAmount += r.refundAmount;
+        }
+      }
+    });
+
+    discrepancies.forEach(disc => {
+      if (disc.date >= startStr && disc.date <= endStr && dayMap.has(disc.date)) {
+        const d = dayMap.get(disc.date)!;
+        d.discrepancyCount += 1;
+      }
+    });
+
+    const result = Array.from(dayMap.values()).map(d => ({
+      ...d,
+      paidAmount: Number(d.paidAmount.toFixed(2)),
+      redeemedAmount: Number(d.redeemedAmount.toFixed(2)),
+      approvedRefundAmount: Number(d.approvedRefundAmount.toFixed(2)),
+      pendingRefundAmount: Number(d.pendingRefundAmount.toFixed(2)),
+      netIncome: Number((d.paidAmount - d.approvedRefundAmount).toFixed(2))
+    }));
+
+    return result.sort((a, b) => a.date.localeCompare(b.date));
+  }, [selectedMonth, paymentOrders, redemptions, refunds, discrepancies]);
+
+  const monthStoreStats = useMemo(() => {
+    const startStr = selectedMonth + '-01';
+    const endDay = dayjs(selectedMonth).daysInMonth();
+    const endStr = selectedMonth + '-' + String(endDay).padStart(2, '0');
+
+    const map = new Map<string, any>();
+    meta.stores.forEach(s => map.set(s, {
+      store: s,
+      orderCount: 0,
+      paidAmount: 0,
+      redemptionCount: 0,
+      redeemedAmount: 0,
+      approvedRefundCount: 0,
+      approvedRefundAmount: 0,
+      pendingRefundCount: 0,
+      pendingRefundAmount: 0,
+      netIncome: 0
+    }));
+
+    paymentOrders.forEach(o => {
+      if (o.date >= startStr && o.date <= endStr && map.has(o.salesStore)) {
+        const s = map.get(o.salesStore)!;
+        s.orderCount += 1;
+        s.paidAmount += o.paidAmount;
+      }
+    });
+
+    redemptions.forEach(r => {
+      if (r.date >= startStr && r.date <= endStr && map.has(r.serviceStore)) {
+        const s = map.get(r.serviceStore)!;
+        s.redemptionCount += r.redemptionCount || 1;
+        s.redeemedAmount += r.amount;
+      }
+    });
+
+    refunds.forEach(r => {
+      if (r.date >= startStr && r.date <= endStr && map.has(r.soldStore)) {
+        const s = map.get(r.soldStore)!;
+        if (r.auditStatus === 'approved') {
+          s.approvedRefundCount += 1;
+          s.approvedRefundAmount += r.refundAmount;
+        } else if (r.auditStatus === 'pending') {
+          s.pendingRefundCount += 1;
+          s.pendingRefundAmount += r.refundAmount;
+        }
+      }
+    });
+
+    return Array.from(map.values()).map(s => ({
+      ...s,
+      paidAmount: Number(s.paidAmount.toFixed(2)),
+      redeemedAmount: Number(s.redeemedAmount.toFixed(2)),
+      approvedRefundAmount: Number(s.approvedRefundAmount.toFixed(2)),
+      pendingRefundAmount: Number(s.pendingRefundAmount.toFixed(2)),
+      netIncome: Number((s.paidAmount - s.approvedRefundAmount).toFixed(2))
+    }));
+  }, [selectedMonth, paymentOrders, redemptions, refunds, meta.stores]);
+
+  const monthCategoryStats = useMemo(() => {
+    const startStr = selectedMonth + '-01';
+    const endDay = dayjs(selectedMonth).daysInMonth();
+    const endStr = selectedMonth + '-' + String(endDay).padStart(2, '0');
+
+    const map = new Map<string, any>();
+
+    coupons.forEach(c => {
+      if (!map.has(c.projectCategory)) {
+        map.set(c.projectCategory, {
+          category: c.projectCategory || '未分类',
+          couponCount: 0,
+          totalCount: 0,
+          totalAmount: 0,
+          paidAmount: 0,
+          redeemedAmount: 0,
+          refundedAmount: 0
+        });
+      }
+    });
+
+    paymentOrders.forEach(o => {
+      if (o.date >= startStr && o.date <= endStr) {
+        const cat = o.projectCategory || '未分类';
+        if (!map.has(cat)) {
+          map.set(cat, { category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0 });
+        }
+        const s = map.get(cat)!;
+        s.couponCount += 1;
+        s.paidAmount += o.paidAmount;
+      }
+    });
+
+    redemptions.forEach(r => {
+      if (r.date >= startStr && r.date <= endStr) {
+        const cat = r.projectCategory || '未分类';
+        if (!map.has(cat)) {
+          map.set(cat, { category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0 });
+        }
+        const s = map.get(cat)!;
+        s.redeemedAmount += r.amount;
+      }
+    });
+
+    refunds.filter(r => r.auditStatus === 'approved').forEach(r => {
+      if (r.date >= startStr && r.date <= endStr) {
+        const coupon = coupons.find(c => c.couponNo === r.couponNo);
+        const cat = coupon?.projectCategory || '未分类';
+        if (!map.has(cat)) {
+          map.set(cat, { category: cat, couponCount: 0, totalCount: 0, totalAmount: 0, paidAmount: 0, redeemedAmount: 0, refundedAmount: 0 });
+        }
+        const s = map.get(cat)!;
+        s.refundedAmount += r.refundAmount;
+      }
+    });
+
+    return Array.from(map.values()).map(s => ({
+      ...s,
+      paidAmount: Number(s.paidAmount.toFixed(2)),
+      redeemedAmount: Number(s.redeemedAmount.toFixed(2)),
+      refundedAmount: Number(s.refundedAmount.toFixed(2)),
+      netIncome: Number((s.paidAmount - s.refundedAmount).toFixed(2))
+    }));
+  }, [selectedMonth, paymentOrders, redemptions, refunds, coupons]);
+
+  const monthSummary = useMemo(() => {
+    const days = monthDailyStats;
+    return {
+      totalDays: days.filter(d => d.orderCount > 0 || d.redemptionCount > 0).length,
+      totalOrders: days.reduce((s, d) => s + d.orderCount, 0),
+      totalPaid: Number(days.reduce((s, d) => s + d.paidAmount, 0).toFixed(2)),
+      totalRedemptions: days.reduce((s, d) => s + d.redemptionCount, 0),
+      totalRedeemed: Number(days.reduce((s, d) => s + d.redeemedAmount, 0).toFixed(2)),
+      totalApprovedRefunds: days.reduce((s, d) => s + d.approvedRefundCount, 0),
+      totalApprovedRefundAmount: Number(days.reduce((s, d) => s + d.approvedRefundAmount, 0).toFixed(2)),
+      totalPendingRefunds: days.reduce((s, d) => s + d.pendingRefundCount, 0),
+      totalPendingRefundAmount: Number(days.reduce((s, d) => s + d.pendingRefundAmount, 0).toFixed(2)),
+      totalDiscrepancies: days.reduce((s, d) => s + d.discrepancyCount, 0),
+      totalNetIncome: Number(days.reduce((s, d) => s + d.netIncome, 0).toFixed(2))
+    };
+  }, [monthDailyStats]);
+
+  const exportMonthlyReport = () => {
+    const wb = XLSX.utils.book_new();
+
+    const summaryData = [{
+      '统计月份': selectedMonth,
+      '营业天数': monthSummary.totalDays,
+      '收款单数': monthSummary.totalOrders,
+      '收款总额(元)': monthSummary.totalPaid,
+      '核销次数': monthSummary.totalRedemptions,
+      '核销总额(元)': monthSummary.totalRedeemed,
+      '已通过退款笔数': monthSummary.totalApprovedRefunds,
+      '已通过退款金额(元)': monthSummary.totalApprovedRefundAmount,
+      '待审核退款笔数': monthSummary.totalPendingRefunds,
+      '待审核退款金额(元)': monthSummary.totalPendingRefundAmount,
+      '差异笔数': monthSummary.totalDiscrepancies,
+      '净收入(元)': monthSummary.totalNetIncome
+    }];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), '月度汇总');
+
+    const dailyData = monthDailyStats.map(d => ({
+      '日期': d.date,
+      '收款单数': d.orderCount,
+      '收款金额(元)': d.paidAmount,
+      '核销次数': d.redemptionCount,
+      '核销金额(元)': d.redeemedAmount,
+      '已通过退款笔数': d.approvedRefundCount,
+      '已通过退款金额(元)': d.approvedRefundAmount,
+      '待审核退款笔数': d.pendingRefundCount,
+      '待审核退款金额(元)': d.pendingRefundAmount,
+      '差异笔数': d.discrepancyCount,
+      '净收入(元)': d.netIncome
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dailyData), '每日明细');
+
+    const storeData = monthStoreStats.map(s => ({
+      '门店': s.store,
+      '收款单数': s.orderCount,
+      '收款金额(元)': s.paidAmount,
+      '核销次数': s.redemptionCount,
+      '核销金额(元)': s.redeemedAmount,
+      '已通过退款笔数': s.approvedRefundCount,
+      '已通过退款金额(元)': s.approvedRefundAmount,
+      '待审核退款笔数': s.pendingRefundCount,
+      '待审核退款金额(元)': s.pendingRefundAmount,
+      '净收入(元)': s.netIncome
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(storeData), '门店维度');
+
+    const categoryData = monthCategoryStats.map(c => ({
+      '项目类别': c.category,
+      '卡券数量': c.couponCount,
+      '收款金额(元)': c.paidAmount,
+      '核销金额(元)': c.redeemedAmount,
+      '已退金额(元)': c.refundedAmount,
+      '净收入(元)': c.netIncome
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(categoryData), '项目类别维度');
+
+    XLSX.writeFile(wb, `月度汇总报告-${selectedMonth}.xlsx`);
+    message.success(`已导出 ${selectedMonth} 月度汇总报告`);
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -591,6 +867,273 @@ const ReportPage: React.FC = () => {
                   />
                 </Card>
               </>
+            )
+          },
+          {
+            key: 'monthly',
+            label: <span><RiseOutlined /> 月度汇总</span>,
+            children: (
+              <div>
+                <Row gutter={[12, 12]} style={{ marginBottom: 16 }} align="middle">
+                  <Col span={18}>
+                    <Space size={12}>
+                      <DatePicker
+                        picker="month"
+                        value={dayjs(selectedMonth)}
+                        onChange={d => d && setSelectedMonth(d.format('YYYY-MM'))}
+                        size="large"
+                        style={{ width: 160 }}
+                        format="YYYY年MM月"
+                      />
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        共 {monthSummary.totalDays} 天有营业数据
+                      </Text>
+                    </Space>
+                  </Col>
+                  <Col span={6} style={{ textAlign: 'right' }}>
+                    <Button type="primary" icon={<DownloadOutlined />} onClick={exportMonthlyReport}>
+                      导出月度报告
+                    </Button>
+                  </Col>
+                </Row>
+
+                <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+                  <Col span={4}>
+                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #2563eb' }}>
+                      <Statistic
+                        title={<span style={{ fontSize: 12, color: '#6b7280' }}>本月收款总额</span>}
+                        prefix="¥"
+                        value={monthSummary.totalPaid / 10000}
+                        precision={2}
+                        suffix="万"
+                        valueStyle={{ color: '#2563eb', fontSize: 20 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={4}>
+                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #f59e0b' }}>
+                      <Statistic
+                        title={<span style={{ fontSize: 12, color: '#6b7280' }}>本月核销总额</span>}
+                        prefix="¥"
+                        value={monthSummary.totalRedeemed / 10000}
+                        precision={2}
+                        suffix="万"
+                        valueStyle={{ color: '#f59e0b', fontSize: 20 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={4}>
+                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #16a34a' }}>
+                      <Statistic
+                        title={<span style={{ fontSize: 12, color: '#6b7280' }}>已通过退款</span>}
+                        prefix="¥"
+                        value={monthSummary.totalApprovedRefundAmount / 10000}
+                        precision={2}
+                        suffix={`万 / ${monthSummary.totalApprovedRefunds}笔`}
+                        valueStyle={{ color: '#16a34a', fontSize: 18 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={4}>
+                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #dc2626' }}>
+                      <Statistic
+                        title={<span style={{ fontSize: 12, color: '#6b7280' }}>待审退款（风险）</span>}
+                        prefix="¥"
+                        value={monthSummary.totalPendingRefundAmount / 10000}
+                        precision={2}
+                        suffix={`万 / ${monthSummary.totalPendingRefunds}笔`}
+                        valueStyle={{ color: '#dc2626', fontSize: 18 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={4}>
+                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #0d9488' }}>
+                      <Statistic
+                        title={<span style={{ fontSize: 12, color: '#6b7280' }}>本月净收入</span>}
+                        prefix="¥"
+                        value={monthSummary.totalNetIncome / 10000}
+                        precision={2}
+                        suffix="万"
+                        valueStyle={{ color: '#0d9488', fontSize: 20 }}
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={4}>
+                    <Card bordered size="small" style={{ borderRadius: 8, borderLeft: '4px solid #8b5cf6' }}>
+                      <Statistic
+                        title={<span style={{ fontSize: 12, color: '#6b7280' }}>待处理差异</span>}
+                        value={monthSummary.totalDiscrepancies}
+                        suffix="笔"
+                        valueStyle={{ color: '#8b5cf6', fontSize: 20 }}
+                      />
+                    </Card>
+                  </Col>
+                </Row>
+
+                <Card
+                  title={<span><FileTextOutlined /> 每日明细</span>}
+                  size="small"
+                  style={{ borderRadius: 8, marginBottom: 16 }}
+                  bodyStyle={{ padding: 0 }}
+                >
+                  <Table
+                    size="small"
+                    dataSource={monthDailyStats.map(d => ({ ...d, key: d.date }))}
+                    pagination={{ pageSize: 15, showSizeChanger: false, showTotal: t => `共 ${t} 天` }}
+                    scroll={{ y: 360 }}
+                    columns={[
+                      { title: '日期', dataIndex: 'date', width: 110, fixed: 'left' as const,
+                        render: (v: string) => <Text strong>{v}</Text>
+                      },
+                      { title: '收款单数', dataIndex: 'orderCount', width: 85, align: 'center' as const },
+                      { title: '收款金额', dataIndex: 'paidAmount', width: 110, align: 'right' as const,
+                        render: (v: number) => <span style={{ color: '#2563eb', fontWeight: 500 }}>¥{v.toFixed(2)}</span>
+                      },
+                      { title: '核销次数', dataIndex: 'redemptionCount', width: 85, align: 'center' as const },
+                      { title: '核销金额', dataIndex: 'redeemedAmount', width: 110, align: 'right' as const,
+                        render: (v: number) => `¥${v.toFixed(2)}`
+                      },
+                      { title: '已通过退款', dataIndex: 'approvedRefundAmount', width: 115, align: 'right' as const,
+                        render: (v: number, r: any) => (
+                          <span style={{ color: '#16a34a' }}>
+                            {r.approvedRefundCount > 0 ? `${r.approvedRefundCount}笔 / -¥${v.toFixed(2)}` : '—'}
+                          </span>
+                        )
+                      },
+                      { title: '待审退款', dataIndex: 'pendingRefundAmount', width: 115, align: 'right' as const,
+                        render: (v: number, r: any) => (
+                          <span style={{ color: '#dc2626' }}>
+                            {r.pendingRefundCount > 0 ? `${r.pendingRefundCount}笔 / ¥${v.toFixed(2)}` : '—'}
+                          </span>
+                        )
+                      },
+                      { title: '差异数', dataIndex: 'discrepancyCount', width: 75, align: 'center' as const,
+                        render: (v: number) => v > 0 ? <Tag color="purple">{v}</Tag> : '—'
+                      },
+                      { title: '净收入', dataIndex: 'netIncome', width: 110, align: 'right' as const, fixed: 'right' as const,
+                        render: (v: number) => <Text strong style={{ color: '#0d9488' }}>¥{v.toFixed(2)}</Text>
+                      }
+                    ]}
+                  />
+                </Card>
+
+                <Row gutter={[16, 16]}>
+                  <Col span={12}>
+                    <Card
+                      title={<span><ShopOutlined /> 门店维度合计</span>}
+                      size="small"
+                      style={{ borderRadius: 8 }}
+                      bodyStyle={{ padding: 0 }}
+                    >
+                      <Table
+                        size="small"
+                        dataSource={monthStoreStats.map((s, i) => ({ ...s, key: i }))}
+                        pagination={false}
+                        scroll={{ y: 320 }}
+                        columns={[
+                          { title: '门店', dataIndex: 'store', width: 100 },
+                          { title: '收款', dataIndex: 'paidAmount', width: 100, align: 'right' as const,
+                            render: (v: number) => `¥${v.toFixed(2)}`
+                          },
+                          { title: '核销', dataIndex: 'redeemedAmount', width: 100, align: 'right' as const,
+                            render: (v: number) => `¥${v.toFixed(2)}`
+                          },
+                          { title: '已退', dataIndex: 'approvedRefundAmount', width: 90, align: 'right' as const,
+                            render: (v: number) => <span style={{ color: '#16a34a' }}>-¥{v.toFixed(2)}</span>
+                          },
+                          { title: '待审', dataIndex: 'pendingRefundAmount', width: 90, align: 'right' as const,
+                            render: (v: number) => <span style={{ color: '#dc2626' }}>¥{v.toFixed(2)}</span>
+                          },
+                          { title: '净收入', dataIndex: 'netIncome', width: 100, align: 'right' as const,
+                            render: (v: number) => <Text strong style={{ color: '#0d9488' }}>¥{v.toFixed(2)}</Text>
+                          }
+                        ]}
+                        summary={() => (
+                          <Table.Summary.Row style={{ background: '#eff6ff', fontWeight: 600 }}>
+                            <Table.Summary.Cell index={0}>合计</Table.Summary.Cell>
+                            <Table.Summary.Cell index={1} align="right">
+                              ¥{monthStoreStats.reduce((s, d) => s + d.paidAmount, 0).toFixed(2)}
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={2} align="right">
+                              ¥{monthStoreStats.reduce((s, d) => s + d.redeemedAmount, 0).toFixed(2)}
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={3} align="right">
+                              <span style={{ color: '#16a34a' }}>
+                                -¥{monthStoreStats.reduce((s, d) => s + d.approvedRefundAmount, 0).toFixed(2)}
+                              </span>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={4} align="right">
+                              <span style={{ color: '#dc2626' }}>
+                                ¥{monthStoreStats.reduce((s, d) => s + d.pendingRefundAmount, 0).toFixed(2)}
+                              </span>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={5} align="right">
+                              <span style={{ color: '#0d9488' }}>
+                                ¥{monthStoreStats.reduce((s, d) => s + d.netIncome, 0).toFixed(2)}
+                              </span>
+                            </Table.Summary.Cell>
+                          </Table.Summary.Row>
+                        )}
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={12}>
+                    <Card
+                      title={<span><WalletOutlined /> 项目类别维度合计</span>}
+                      size="small"
+                      style={{ borderRadius: 8 }}
+                      bodyStyle={{ padding: 0 }}
+                    >
+                      <Table
+                        size="small"
+                        dataSource={monthCategoryStats.map((c, i) => ({ ...c, key: i }))}
+                        pagination={false}
+                        scroll={{ y: 320 }}
+                        columns={[
+                          { title: '项目类别', dataIndex: 'category', width: 130 },
+                          { title: '卡券数', dataIndex: 'couponCount', width: 70, align: 'center' as const },
+                          { title: '收款金额', dataIndex: 'paidAmount', width: 110, align: 'right' as const,
+                            render: (v: number) => <span style={{ color: '#2563eb' }}>¥{v.toFixed(2)}</span>
+                          },
+                          { title: '核销金额', dataIndex: 'redeemedAmount', width: 110, align: 'right' as const,
+                            render: (v: number) => `¥${v.toFixed(2)}`
+                          },
+                          { title: '已退金额', dataIndex: 'refundedAmount', width: 100, align: 'right' as const,
+                            render: (v: number) => <span style={{ color: '#16a34a' }}>-¥{v.toFixed(2)}</span>
+                          },
+                          { title: '净收入', dataIndex: 'netIncome', width: 110, align: 'right' as const,
+                            render: (v: number) => <Text strong style={{ color: '#0d9488' }}>¥{v.toFixed(2)}</Text>
+                          }
+                        ]}
+                        summary={() => (
+                          <Table.Summary.Row style={{ background: '#eff6ff', fontWeight: 600 }}>
+                            <Table.Summary.Cell index={0}>合计</Table.Summary.Cell>
+                            <Table.Summary.Cell index={1} align="center">
+                              {monthCategoryStats.reduce((s, d) => s + d.couponCount, 0)}
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={2} align="right">
+                              ¥{monthCategoryStats.reduce((s, d) => s + d.paidAmount, 0).toFixed(2)}
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={3} align="right">
+                              ¥{monthCategoryStats.reduce((s, d) => s + d.redeemedAmount, 0).toFixed(2)}
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={4} align="right">
+                              <span style={{ color: '#16a34a' }}>
+                                -¥{monthCategoryStats.reduce((s, d) => s + d.refundedAmount, 0).toFixed(2)}
+                              </span>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={5} align="right">
+                              <span style={{ color: '#0d9488' }}>
+                                ¥{monthCategoryStats.reduce((s, d) => s + d.netIncome, 0).toFixed(2)}
+                              </span>
+                            </Table.Summary.Cell>
+                          </Table.Summary.Row>
+                        )}
+                      />
+                    </Card>
+                  </Col>
+                </Row>
+              </div>
             )
           },
           {
@@ -846,39 +1389,65 @@ const ReportPage: React.FC = () => {
               </div>
 
               <h2 style={{ fontSize: 16, fontWeight: 600, paddingBottom: 6, borderBottom: '2px solid #111827' }}>一、核心经营指标</h2>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
-                <thead>
-                  <tr style={{ background: '#f9fafb' }}>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'left' }}>类别</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>数量</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>金额（元）</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>当日收款（含各种支付方式）</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.summary.totalOrders} 单</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', fontWeight: 600 }}>¥{previewReport.summary.totalPaidAmount.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>当日服务核销</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.summary.totalRedemptions} 次</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{previewReport.summary.totalRedeemedAmount.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', color: '#dc2626' }}>当日已通过退款（扣减）</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.summary.totalRefunds} 笔</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#dc2626' }}>-¥{previewReport.summary.totalRefundAmount.toFixed(2)}</td>
-                  </tr>
-                  <tr style={{ background: '#f0fdf4', fontWeight: 700 }}>
-                    <td style={{ padding: '10px 12px', border: '1px solid #d1d5db' }}>当日净收入</td>
-                    <td style={{ padding: '10px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>—</td>
-                    <td style={{ padding: '10px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#16a34a', fontSize: 15 }}>
-                      ¥{(previewReport.summary.totalPaidAmount - previewReport.summary.totalRefundAmount).toFixed(2)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              {(() => {
+                const pendingRefunds = refunds.filter(r => r.date === previewReport.reportDate && r.auditStatus === 'pending');
+                const pendingRefundCount = pendingRefunds.length;
+                const pendingRefundAmount = pendingRefunds.reduce((s, r) => s + r.refundAmount, 0);
+                return (
+                  <>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
+                      <thead>
+                        <tr style={{ background: '#f9fafb' }}>
+                          <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'left' }}>类别</th>
+                          <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>数量</th>
+                          <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>金额（元）</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>当日收款（含各种支付方式）</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.summary.totalOrders} 单</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', fontWeight: 600 }}>¥{previewReport.summary.totalPaidAmount.toFixed(2)}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>当日服务核销</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.summary.totalRedemptions} 次</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{previewReport.summary.totalRedeemedAmount.toFixed(2)}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', color: '#dc2626' }}>当日已通过退款（扣减收入）</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.summary.totalRefunds} 笔</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#dc2626' }}>-¥{previewReport.summary.totalRefundAmount.toFixed(2)}</td>
+                        </tr>
+                        <tr style={{ background: '#fff7ed' }}>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', color: '#c2410c' }}>
+                            <AlertOutlined style={{ marginRight: 4 }} />
+                            当日待审核退款（风险占用）
+                          </td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center', color: '#c2410c' }}>{pendingRefundCount} 笔</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#c2410c' }}>
+                            ¥{pendingRefundAmount.toFixed(2)}
+                            <span style={{ fontSize: 11, marginLeft: 4 }}>（未扣减收入）</span>
+                          </td>
+                        </tr>
+                        <tr style={{ background: '#f0fdf4', fontWeight: 700 }}>
+                          <td style={{ padding: '10px 12px', border: '1px solid #d1d5db' }}>当日净收入</td>
+                          <td style={{ padding: '10px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>—</td>
+                          <td style={{ padding: '10px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#16a34a', fontSize: 15 }}>
+                            ¥{(previewReport.summary.totalPaidAmount - previewReport.summary.totalRefundAmount).toFixed(2)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    {pendingRefundCount > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: '#92400e', background: '#fffbeb', padding: '6px 10px', borderRadius: 4, border: '1px solid #fcd34d' }}>
+                        <AlertOutlined style={{ marginRight: 4 }} />
+                        风险提示：当日有 {pendingRefundCount} 笔待审核退款，金额 ¥{pendingRefundAmount.toFixed(2)}，请及时处理避免实际收入与预期不符
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               <h2 style={{ fontSize: 16, fontWeight: 600, paddingBottom: 6, borderBottom: '2px solid #111827', marginTop: 28 }}>二、卡券发放统计</h2>
               <div className="info-row" style={{ marginTop: 10 }}>
@@ -889,41 +1458,58 @@ const ReportPage: React.FC = () => {
               </div>
 
               <h2 style={{ fontSize: 16, fontWeight: 600, paddingBottom: 6, borderBottom: '2px solid #111827', marginTop: 28 }}>三、门店维度明细</h2>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
-                <thead>
-                  <tr style={{ background: '#f9fafb' }}>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>门店</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>收款单数</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>收款金额</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>核销次数</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>核销金额</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>退款金额</th>
-                    <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>净收款</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewReport.storeBreakdown.map((s: any, i: number) => (
-                    <tr key={i}>
-                      <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', fontWeight: 500 }}>{s.store}</td>
-                      <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{s.orderCount || 0}</td>
-                      <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{s.paidAmount.toFixed(2)}</td>
-                      <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{s.redemptionCount || 0}</td>
-                      <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{s.redeemedAmount.toFixed(2)}</td>
-                      <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#dc2626' }}>-¥{s.refundAmount.toFixed(2)}</td>
-                      <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', fontWeight: 600 }}>¥{s.net.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                  <tr style={{ background: '#eff6ff', fontWeight: 700 }}>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>合计</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.storeBreakdown.reduce((s, d: any) => s + (d.orderCount || 0), 0)}</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.paidAmount, 0).toFixed(2)}</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.storeBreakdown.reduce((s, d: any) => s + (d.redemptionCount || 0), 0)}</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.redeemedAmount, 0).toFixed(2)}</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#dc2626' }}>-¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.refundAmount, 0).toFixed(2)}</td>
-                    <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#1f4e79' }}>¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.net, 0).toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
+              {(() => {
+                const pendingByStore = new Map<string, number>();
+                refunds.filter(r => r.date === previewReport.reportDate && r.auditStatus === 'pending')
+                  .forEach(r => {
+                    pendingByStore.set(r.soldStore, (pendingByStore.get(r.soldStore) || 0) + r.refundAmount);
+                  });
+                const totalPending = Array.from(pendingByStore.values()).reduce((s, v) => s + v, 0);
+                return (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 8 }}>
+                    <thead>
+                      <tr style={{ background: '#f9fafb' }}>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>门店</th>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>收款单数</th>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>收款金额</th>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>核销次数</th>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>核销金额</th>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>已通过退款</th>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#c2410c' }}>待审退款（风险）</th>
+                        <th style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>净收款</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewReport.storeBreakdown.map((s: any, i: number) => (
+                        <tr key={i}>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', fontWeight: 500 }}>{s.store}</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{s.orderCount || 0}</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{s.paidAmount.toFixed(2)}</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{s.redemptionCount || 0}</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{s.redeemedAmount.toFixed(2)}</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#dc2626' }}>-¥{s.refundAmount.toFixed(2)}</td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#c2410c', background: '#fff7ed' }}>
+                            ¥{(pendingByStore.get(s.store) || 0).toFixed(2)}
+                          </td>
+                          <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', fontWeight: 600 }}>¥{s.net.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: '#eff6ff', fontWeight: 700 }}>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db' }}>合计</td>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.storeBreakdown.reduce((s, d: any) => s + (d.orderCount || 0), 0)}</td>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.paidAmount, 0).toFixed(2)}</td>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'center' }}>{previewReport.storeBreakdown.reduce((s, d: any) => s + (d.redemptionCount || 0), 0)}</td>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right' }}>¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.redeemedAmount, 0).toFixed(2)}</td>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#dc2626' }}>-¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.refundAmount, 0).toFixed(2)}</td>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#c2410c', background: '#fff7ed' }}>
+                          ¥{totalPending.toFixed(2)}
+                        </td>
+                        <td style={{ padding: '8px 12px', border: '1px solid #d1d5db', textAlign: 'right', color: '#1f4e79' }}>¥{previewReport.storeBreakdown.reduce((s, d: any) => s + d.net, 0).toFixed(2)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                );
+              })()}
 
               {previewReport.crossStoreSplit.length > 0 && (
                 <>
