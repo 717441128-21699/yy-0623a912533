@@ -112,7 +112,7 @@ const App: React.FC = () => {
     setCoupons(mock.coupons);
     setRedemptions(mock.redemptions);
     setRefunds(mock.refunds);
-    const disc = generateDiscrepancies(mock.paymentOrders, mock.redemptions, businessDate);
+    const disc = generateDiscrepancies(mock.paymentOrders, mock.redemptions, mock.coupons, businessDate);
     setDiscrepancies(disc);
     addAudit({
       module: 'system',
@@ -149,7 +149,7 @@ const App: React.FC = () => {
         setCoupons(mock.coupons);
         setRedemptions(mock.redemptions);
         setRefunds(mock.refunds);
-        const disc = generateDiscrepancies(mock.paymentOrders, mock.redemptions, businessDate);
+        const disc = generateDiscrepancies(mock.paymentOrders, mock.redemptions, mock.coupons, businessDate);
         setDiscrepancies(disc);
       }
     })();

@@ -278,12 +278,14 @@ export function generateMockData(dateStr: string = dayjs().format('YYYY-MM-DD'))
 export function generateDiscrepancies(
   orders: PaymentOrder[],
   redemptions: RedemptionRecord[],
+  coupons: Coupon[],
   dateStr: string
 ): DiscrepancyRecord[] {
   const discrepancies: DiscrepancyRecord[] = [];
 
   const orderByCoupon = new Map<string, PaymentOrder[]>();
   const redeemByCoupon = new Map<string, RedemptionRecord[]>();
+  const couponMap = new Map<string, Coupon>();
 
   orders.forEach(o => {
     if (!o.couponNo) return;
@@ -299,7 +301,14 @@ export function generateDiscrepancies(
     redeemByCoupon.set(r.couponNo, arr);
   });
 
+  coupons.forEach(c => {
+    couponMap.set(c.couponNo, c);
+  });
+
+  const processedCoupons = new Set<string>();
+
   for (const [couponNo, ordList] of orderByCoupon.entries()) {
+    processedCoupons.add(couponNo);
     const redList = redeemByCoupon.get(couponNo) || [];
     const firstOrd = ordList[0];
     if (redList.length === 0 && firstOrd.date === dateStr) {
@@ -333,15 +342,42 @@ export function generateDiscrepancies(
         paidAmount: firstOrd.paidAmount,
         redeemedAmount: totalRedeemed,
         diffAmount: totalRedeemed - (firstOrd.paidAmount / Math.max(1, firstOrd.paidAmount)) * redList[0].amount,
-        description: `同一券号 ${couponNo} 在当日出现 ${redList.length} 条核销记录，疑似重复核销，请核实操作记录。`,
+        description: '同一券号 ' + couponNo + ' 在当日出现 ' + redList.length + ' 条核销记录，疑似重复核销，请核实操作记录。',
         relatedRedemptionNo: redList.map(r => r.redemptionNo).join('、'),
         relatedIds: redList.map(r => r.id),
         handleStatus: 'pending'
       });
     }
+
+    const coupon = couponMap.get(couponNo);
+    if (redList.length > 0 && coupon && coupon.totalCount > 0) {
+      const expectedUnit = Number((firstOrd.totalAmount / coupon.totalCount).toFixed(2));
+      for (const r of redList) {
+        if (Math.abs(expectedUnit - r.unitPrice) > 0.01) {
+          discrepancies.push({
+            id: genId('DS'),
+            type: 'amount_mismatch',
+            date: dateStr,
+            customerId: firstOrd.customerId,
+            customerName: firstOrd.customerName,
+            couponNo: couponNo,
+            projectName: firstOrd.projectName,
+            paidAmount: expectedUnit,
+            redeemedAmount: r.unitPrice,
+            diffAmount: Number((expectedUnit - r.unitPrice).toFixed(2)),
+            description: '核销单价 ¥' + r.unitPrice.toFixed(2) + ' 与收费折算单价 ¥' + expectedUnit.toFixed(2) + ' 不一致，请核查活动折扣或手工改价记录。',
+            relatedOrderNo: firstOrd.orderNo,
+            relatedRedemptionNo: r.redemptionNo,
+            relatedIds: [firstOrd.id, r.id],
+            handleStatus: 'pending'
+          });
+        }
+      }
+    }
   }
 
   for (const [couponNo, redList] of redeemByCoupon.entries()) {
+    if (processedCoupons.has(couponNo)) continue;
     const ordList = orderByCoupon.get(couponNo) || [];
     if (ordList.length === 0) {
       const firstR = redList[0];
@@ -356,35 +392,9 @@ export function generateDiscrepancies(
         paidAmount: 0,
         redeemedAmount: redList.reduce((s, r) => s + r.amount, 0),
         diffAmount: -redList.reduce((s, r) => s + r.amount, 0),
-        description: `券号 ${couponNo} 已核销 ${redList.length} 次，但收款系统中查无对应收费记录。请核实是否漏单或卡券来源异常。`,
+        description: '券号 ' + couponNo + ' 已核销 ' + redList.length + ' 次，但收款系统中查无对应收费记录。请核实是否漏单或卡券来源异常。',
         relatedRedemptionNo: redList.map(r => r.redemptionNo).join('、'),
         relatedIds: redList.map(r => r.id),
-        handleStatus: 'pending'
-      });
-    }
-  }
-
-  const diffCoupon = 'KQDIFF003';
-  const orderDiff = orders.find(o => o.couponNo === diffCoupon);
-  const redeemDiff = redemptions.find(r => r.couponNo === diffCoupon);
-  if (orderDiff && redeemDiff) {
-    const expectedUnit = Number((orderDiff.totalAmount / 5).toFixed(2));
-    if (Math.abs(expectedUnit - redeemDiff.unitPrice) > 0.01) {
-      discrepancies.push({
-        id: genId('DS'),
-        type: 'amount_mismatch',
-        date: dateStr,
-        customerId: orderDiff.customerId,
-        customerName: orderDiff.customerName,
-        couponNo: diffCoupon,
-        projectName: orderDiff.projectName,
-        paidAmount: expectedUnit,
-        redeemedAmount: redeemDiff.unitPrice,
-        diffAmount: expectedUnit - redeemDiff.unitPrice,
-        description: `核销单价 ¥${redeemDiff.unitPrice.toFixed(2)} 与收费折算单价 ¥${expectedUnit.toFixed(2)} 不一致，请核查活动折扣或手工改价记录。`,
-        relatedOrderNo: orderDiff.orderNo,
-        relatedRedemptionNo: redeemDiff.redemptionNo,
-        relatedIds: [orderDiff.id, redeemDiff.id],
         handleStatus: 'pending'
       });
     }

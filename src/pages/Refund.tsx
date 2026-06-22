@@ -40,8 +40,8 @@ import {
 import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 import { useApp } from '@/App';
-import type { RefundRecord, Coupon, RedemptionRecord } from '@/types';
-import { genId } from '@/store';
+import type { RefundRecord, Coupon, RedemptionRecord, AuditTrail } from '@/types';
+import { genId, store } from '@/store';
 
 const { Text, Paragraph } = Typography;
 const { RangePicker } = DatePicker;
@@ -67,10 +67,25 @@ const reasonOptions = [
 const RefundPage: React.FC = () => {
   const {
     businessDate, refunds, setRefunds,
-    coupons, redemptions, paymentOrders,
+    coupons, setCoupons, redemptions, paymentOrders,
+    auditTrails,
     addAudit, persistAll, meta
   } = useApp();
   const { message, modal } = App.useApp();
+
+  const getActualUsedCount = (couponNo: string): number => {
+    return redemptions
+      .filter(r => r.couponNo === couponNo)
+      .reduce((sum, r) => sum + r.redemptionCount, 0);
+  };
+
+  const getActualRemainingCount = (c: Coupon): number => {
+    const used = getActualUsedCount(c.couponNo);
+    const refunded = refunds
+      .filter(r => r.couponNo === c.couponNo && r.auditStatus === 'approved')
+      .reduce((sum, r) => sum + r.refundCount, 0);
+    return Math.max(0, c.totalCount - used - refunded);
+  };
 
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -153,7 +168,7 @@ const RefundPage: React.FC = () => {
   };
 
   const startCreate = () => {
-    if (coupons.filter(c => c.totalCount - c.usedCount > 0).length === 0) {
+    if (coupons.filter(c => getActualRemainingCount(c) > 0 && c.status === 'active').length === 0) {
       message.warning('没有可退款的有效卡券');
       return;
     }
@@ -166,8 +181,8 @@ const RefundPage: React.FC = () => {
     const c = coupons.find(x => x.id === couponId);
     if (c) {
       setSelectedCouponForRefund(c);
-      const usedCount = c.usedCount;
-      const remainingCount = Math.max(0, c.totalCount - usedCount);
+      const usedCount = getActualUsedCount(c.couponNo);
+      const remainingCount = getActualRemainingCount(c);
       createForm.setFieldsValue({
         couponId: c.id,
         customerName: c.customerName,
@@ -197,7 +212,7 @@ const RefundPage: React.FC = () => {
     if (!selectedCouponForRefund) return;
     const newRecord: RefundRecord = {
       id: genId('RF'),
-      refundNo: `TK${businessDate.replace(/-/g, '')}${(refunds.length + 1).toString().padStart(4, '0')}`,
+      refundNo: 'TK' + businessDate.replace(/-/g, '') + (refunds.length + 1).toString().padStart(4, '0'),
       date: businessDate,
       customerId: selectedCouponForRefund.customerId,
       customerName: values.customerName,
@@ -218,18 +233,37 @@ const RefundPage: React.FC = () => {
       auditRemark: undefined,
       createdAt: new Date().toISOString()
     };
-    setRefunds([newRecord, ...refunds]);
+    const newRefunds = [newRecord, ...refunds];
+
+    const newTrail: AuditTrail = {
+      id: genId('AT'),
+      module: 'refund',
+      action: 'create',
+      operator: '财务员',
+      targetId: newRecord.refundNo,
+      afterData: newRecord,
+      remark: '创建退款申请 ' + newRecord.customerName + ' ¥' + newRecord.refundAmount,
+      timestamp: new Date().toISOString()
+    };
+    const newAuditTrails = [newTrail, ...auditTrails].slice(0, 500);
+
+    setRefunds(newRefunds);
     addAudit({
       module: 'refund',
       action: 'create',
       operator: '财务员',
       targetId: newRecord.refundNo,
       afterData: newRecord,
-      remark: `创建退款申请 ${newRecord.customerName} ¥${newRecord.refundAmount}`
+      remark: '创建退款申请 ' + newRecord.customerName + ' ¥' + newRecord.refundAmount
     });
-    await persistAll();
+
+    await Promise.all([
+      store.writeRefunds(newRefunds),
+      store.writeAuditTrails(newAuditTrails)
+    ]);
+
     setCreateOpen(false);
-    message.success(`退款申请已创建：${newRecord.refundNo}`);
+    message.success('退款申请已创建：' + newRecord.refundNo);
   };
 
   const openAudit = (r: RefundRecord) => {
@@ -251,41 +285,61 @@ const RefundPage: React.FC = () => {
       auditRemark: values.auditRemark,
       approver: values.approver
     };
-    const list = refunds.map(r => r.id === updated.id ? updated : r);
-    setRefunds(list);
+    const newRefunds = refunds.map(r => r.id === updated.id ? updated : r);
+    let newCoupons = coupons;
 
     if (values.decision === 'approved') {
-      const newCoupons = coupons.map(c => {
+      newCoupons = coupons.map(c => {
         if (c.couponNo === updated.couponNo) {
           const newTotal = Math.max(0, c.totalCount - updated.refundCount);
+          const newUsedCount = Math.min(newTotal, getActualUsedCount(c.couponNo));
           return {
             ...c,
             totalCount: newTotal,
-            status: newTotal <= 0 || c.usedCount >= newTotal ? 'used_up' : c.status
+            usedCount: newUsedCount,
+            status: newTotal <= 0 || newUsedCount >= newTotal ? 'used_up' : c.status
           };
         }
         return c;
       });
-      await Promise.all([
-        persistAll(),
-        useApp().setCoupons(newCoupons)
-      ]);
-    } else {
-      await persistAll();
+      setCoupons(newCoupons);
     }
 
-    addAudit({
+    const newTrail: AuditTrail = {
+      id: genId('AT'),
       module: 'refund',
-      action: `audit_${values.decision}`,
+      action: 'audit_' + values.decision,
       operator: values.approver,
       targetId: updated.refundNo,
       beforeData: before,
       afterData: updated,
-      remark: `审核退款：${values.decision === 'approved' ? '通过' : '驳回'} - ${values.auditRemark || '无'}`
+      remark: '审核退款：' + (values.decision === 'approved' ? '通过' : '驳回') + ' - ' + (values.auditRemark || '无'),
+      timestamp: new Date().toISOString()
+    };
+    const newAuditTrails = [newTrail, ...auditTrails].slice(0, 500);
+
+    setRefunds(newRefunds);
+    addAudit({
+      module: 'refund',
+      action: 'audit_' + values.decision,
+      operator: values.approver,
+      targetId: updated.refundNo,
+      beforeData: before,
+      afterData: updated,
+      remark: '审核退款：' + (values.decision === 'approved' ? '通过' : '驳回') + ' - ' + (values.auditRemark || '无')
     });
 
+    const writes: Promise<boolean>[] = [
+      store.writeRefunds(newRefunds),
+      store.writeAuditTrails(newAuditTrails)
+    ];
+    if (values.decision === 'approved') {
+      writes.push(store.writeCoupons(newCoupons));
+    }
+    await Promise.all(writes);
+
     setAuditOpen(false);
-    message.success(`已${values.decision === 'approved' ? '通过' : '驳回'}退款申请`);
+    message.success('已' + (values.decision === 'approved' ? '通过' : '驳回') + '退款申请');
   };
 
   const exportData = () => {
@@ -355,7 +409,7 @@ const RefundPage: React.FC = () => {
     }
   ];
 
-  const availableCoupons = coupons.filter(c => c.totalCount - c.usedCount > 0 && c.status === 'active');
+  const availableCoupons = coupons.filter(c => getActualRemainingCount(c) > 0 && c.status === 'active');
 
   return (
     <div>
@@ -567,7 +621,11 @@ const RefundPage: React.FC = () => {
                   {(() => {
                     const c = getCouponForRefund(selectedRefund.couponNo);
                     const rs = getRedemptionsForCoupon(selectedRefund.couponNo);
-                    const remainingCount = c ? c.totalCount - c.usedCount : 0;
+                    const usedFromRedemptions = c ? getActualUsedCount(c.couponNo) : 0;
+                    const refunded = refunds
+                      .filter(r => r.couponNo === selectedRefund.couponNo && r.auditStatus === 'approved')
+                      .reduce((sum, r) => sum + r.refundCount, 0);
+                    const remainingCount = c ? Math.max(0, c.totalCount - usedFromRedemptions - refunded) : 0;
                     const refundableAmount = c ? remainingCount * c.unitPrice : 0;
                     return (
                       <Card size="small" style={{ borderRadius: 8, background: '#f0f9ff', border: '1px solid #bfdbfe' }}>
@@ -581,7 +639,7 @@ const RefundPage: React.FC = () => {
                             <div style={{ fontSize: 20, fontWeight: 600 }}>
                               <span className="amount-positive">{remainingCount}</span> 次
                               <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>
-                                （总{c?.totalCount || 0}次 - 已用{c?.usedCount || 0}次）
+                                （总{c?.totalCount || 0}次 - 已用{usedFromRedemptions}次 - 已退{refunded}次）
                               </div>
                             </div>
                           </Col>
@@ -703,7 +761,7 @@ const RefundPage: React.FC = () => {
               onChange={handleCouponSelect}
               options={availableCoupons.map(c => ({
                 value: c.id,
-                label: `${c.customerName} | ${c.phone} | ${c.couponNo} | ${c.couponName} | 剩余${c.totalCount - c.usedCount}次`,
+                label: c.customerName + ' | ' + c.phone + ' | ' + c.couponNo + ' | ' + c.couponName + ' | 剩余' + getActualRemainingCount(c) + '次',
                 customerName: c.customerName,
                 phone: c.phone
               }))}

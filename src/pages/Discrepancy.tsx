@@ -153,7 +153,7 @@ const DiscrepancyPage: React.FC = () => {
           d
         ]));
         import('@/utils/mockData').then(({ generateDiscrepancies }) => {
-          const newDiscs = generateDiscrepancies(paymentOrders, redemptions, businessDate);
+          const newDiscs = generateDiscrepancies(paymentOrders, redemptions, coupons, businessDate);
           const merged = newDiscs.map(nd => {
             const key = `${nd.type}|${nd.couponNo || ''}|${nd.customerId}|${nd.projectName || ''}`;
             const old = existingMap.get(key);
