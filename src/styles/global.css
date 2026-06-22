@@ -1,0 +1,256 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1f2937;
+  background-color: #f0f2f5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.app-header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+  letter-spacing: 0.3px;
+}
+
+.app-header-sub {
+  font-size: 12px;
+  color: #6b7280;
+  margin-left: 8px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.page-desc {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+.stat-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px 20px;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+
+.stat-card:hover {
+  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.06);
+}
+
+.stat-card-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.stat-card-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card-unit {
+  font-size: 13px;
+  color: #6b7280;
+  margin-left: 4px;
+  font-weight: normal;
+}
+
+.stat-card-trend {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.tag-pro {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #eff6ff;
+  color: #1f4e79;
+  border: 1px solid #bfdbfe;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 12px 0;
+  padding-left: 8px;
+  border-left: 3px solid #1f4e79;
+}
+
+.amount-positive {
+  color: #16a34a;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.amount-negative {
+  color: #dc2626;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.amount-neutral {
+  color: #1f2937;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.filter-section {
+  background: #fff;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+}
+
+.discrepancy-card {
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid;
+  padding: 16px;
+  border-radius: 8px;
+  background: #fff;
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+}
+
+.discrepancy-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.discrepancy-paid_not_redeemed { border-left-color: #f59e0b; }
+.discrepancy-redeemed_not_paid { border-left-color: #ef4444; }
+.discrepancy-duplicate_redemption { border-left-color: #a855f7; }
+.discrepancy-amount_mismatch { border-left-color: #f97316; }
+
+.audit-item {
+  padding: 10px 12px;
+  border-bottom: 1px dashed #e5e7eb;
+  font-size: 12px;
+}
+
+.audit-item:last-child {
+  border-bottom: none;
+}
+
+.print-area {
+  padding: 40px;
+  background: #fff;
+  color: #111827;
+}
+
+.print-area h1 {
+  text-align: center;
+  font-size: 22px;
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.print-area h2 {
+  font-size: 15px;
+  margin: 24px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #111827;
+  font-weight: 600;
+}
+
+.print-area .info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.print-area table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.print-area th, .print-area td {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.print-area th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+.empty-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #9ca3af;
+}
+
+.upload-preview-table .ant-table-tbody > tr > td {
+  padding: 8px 14px;
+}
+
+.store-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 12px;
+  border-radius: 10px;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+}
+
+.store-tag-primary {
+  background: #eff6ff;
+  color: #1f4e79;
+  border-color: #bfdbfe;
+}
